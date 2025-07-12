@@ -254,26 +254,34 @@ def formulario_eliminar_producto():
         st.warning("No hay productos para eliminar")
         return
     
+    # Usamos un key único para el selectbox
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
-        key="select_eliminar"
+        key="select_eliminar_unique"
     )
     
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
     
     st.warning(f"¿Está seguro que desea eliminar permanentemente este producto?")
-    st.json({
-        "Nombre": producto['nombre'],
-        "Stock actual": producto['stock'],
-        "Precio": f"${producto['precio']:,.2f}",
-        "Costo": f"${producto['costo']:,.2f}"
-    })
     
-    if st.button("Confirmar Eliminación"):
+    # Mostramos detalles del producto
+    with st.expander("Detalles del producto a eliminar"):
+        st.write(f"**Nombre:** {producto['nombre']}")
+        st.write(f"**Stock actual:** {producto['stock']}")
+        st.write(f"**Precio:** ${producto['precio']:,.2f}")
+        st.write(f"**Costo:** ${producto['costo']:,.2f}")
+    
+    # Botón de confirmación con lógica mejorada
+    if st.button("Confirmar Eliminación", key="confirm_delete_btn"):
         eliminar_producto(producto['id'])
-        st.experimental_rerun()
-
+        
+        # Opción 1: Usar st.rerun() (recomendado para Streamlit >= 1.12.0)
+        st.rerun()
+        
+        # Opción 2: Actualización sin rerun (alternativa)
+        # st.session_state.productos = obtener_productos()
+        # st.success("Producto eliminado correctamente")
 
 def formulario_ajustar_stock():
     st.header("Ajustar Stock")
