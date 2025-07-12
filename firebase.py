@@ -192,9 +192,9 @@ def mostrar_inventario():
             'Costo Total': '${:,.2f}',
             'Margen': '${:,.2f}',
             'Margen %': '{:.2f}%'
-        }),
-        use_container_width=True,
-        height=min(400, 35 + 35 * len(productos))
+        })),
+    use_container_width=True,
+    height=min(400, 35 + 35 * len(productos))
     
     # Resumen estadístico
     st.subheader("📊 Resumen del Inventario")
