@@ -285,43 +285,62 @@ def formulario_eliminar_producto():
 
 def formulario_ajustar_stock():
     st.header("Ajustar Stock")
-    productos = obtener_productos()
+    
+    # Cargar productos con manejo de estado
+    if 'productos_actualizados' not in st.session_state:
+        st.session_state.productos_actualizados = obtener_productos()
+    
+    productos = st.session_state.productos_actualizados
     
     if productos.empty:
         st.warning("No hay productos disponibles")
         return
     
+    # Widgets con keys únicos
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
-        key="select_ajustar"
+        key="select_ajuste_stock"
     )
     
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
     
-    st.info(f"Stock actual: {producto['stock']}")
+    st.info(f"**Stock actual:** {producto['stock']}")
     
+    # Opciones de ajuste
     tipo_ajuste = st.radio(
         "Tipo de ajuste:",
         ['Entrada (aumentar stock)', 'Salida (reducir stock)'],
-        key="radio_ajuste"
+        key="radio_tipo_ajuste",
+        horizontal=True
     )
     
     cantidad = st.number_input(
-        "Cantidad",
+        "Cantidad a ajustar",
         min_value=1,
         max_value=10000 if tipo_ajuste.startswith('Entrada') else producto['stock'],
-        value=1
+        value=1,
+        key="num_cantidad_ajuste"
     )
     
-    if st.button("Aplicar Ajuste"):
-        ajustar_stock(
-            producto['id'],
-            cantidad,
-            'entrada' if tipo_ajuste.startswith('Entrada') else 'salida'
-        )
-        st.experimental_rerun()
-
+    # Botón con lógica mejorada
+    if st.button("Aplicar Ajuste", key="btn_aplicar_ajuste"):
+        try:
+            ajustar_stock(
+                producto['id'],
+                cantidad,
+                'entrada' if tipo_ajuste.startswith('Entrada') else 'salida'
+            )
+            st.success("¡Ajuste realizado correctamente!")
+            
+            # Actualizar el estado sin necesidad de rerun
+            st.session_state.productos_actualizados = obtener_productos()
+            
+            # Opcional: Usar st.rerun() si es necesario
+            # st.rerun()
+            
+        except Exception as e:
+            st.error(f"Error al ajustar stock: {str(e)}")
 def mostrar_historial():
     st.header("Historial de Movimientos")
     movimientos = obtener_movimientos()
