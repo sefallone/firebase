@@ -11,7 +11,7 @@ st.title("📦 Sistema de Gestión de Inventario")
 DB_FILE = "inventario.db"
 
 # ------------------------------------------
-# FUNCIONES DE BASE DE DATOS
+# FUNCIONES MEJORADAS DE BASE DE DATOS
 # ------------------------------------------
 
 def init_db():
@@ -36,7 +36,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS movimientos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             producto_id INTEGER,
-            tipo TEXT NOT NULL,  -- 'entrada' o 'salida'
+            tipo TEXT NOT NULL,
             cantidad INTEGER NOT NULL,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             nota TEXT,
@@ -52,7 +52,7 @@ def get_connection():
     return sqlite3.connect(DB_FILE)
 
 def ejecutar_consulta(query, params=(), fetch=False):
-    """Ejecuta una consulta SQL y retorna resultados si es necesario"""
+    """Ejecuta una consulta SQL con manejo de errores mejorado"""
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -63,18 +63,14 @@ def ejecutar_consulta(query, params=(), fetch=False):
                 return c.fetchall()
             return None
         return True
-    except Exception as e:
+    except sqlite3.Error as e:
         st.error(f"Error de base de datos: {str(e)}")
         return False
     finally:
         conn.close()
 
-# ------------------------------------------
-# FUNCIONES PRINCIPALES
-# ------------------------------------------
-
 def obtener_productos():
-    """Obtiene todos los productos como DataFrame"""
+    """Obtiene todos los productos actualizados"""
     conn = get_connection()
     try:
         df = pd.read_sql("SELECT * FROM productos ORDER BY nombre", conn)
@@ -82,23 +78,12 @@ def obtener_productos():
     finally:
         conn.close()
 
-def obtener_movimientos():
-    """Obtiene el historial de movimientos"""
-    conn = get_connection()
-    try:
-        df = pd.read_sql('''
-            SELECT m.fecha, p.nombre, m.tipo, m.cantidad, p.precio, m.nota 
-            FROM movimientos m
-            JOIN productos p ON m.producto_id = p.id
-            ORDER BY m.fecha DESC
-            LIMIT 100
-        ''', conn)
-        return df
-    finally:
-        conn.close()
+# ------------------------------------------
+# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO
+# ------------------------------------------
 
 def agregar_producto(nombre, stock, precio, costo):
-    """Agrega un nuevo producto a la base de datos"""
+    """Agrega un nuevo producto con actualización de estado"""
     try:
         # Insertar producto
         if not ejecutar_consulta(
@@ -108,10 +93,7 @@ def agregar_producto(nombre, stock, precio, costo):
             return False
         
         # Obtener ID del producto insertado
-        producto_id = ejecutar_consulta(
-            "SELECT last_insert_rowid()",
-            fetch=True
-        )[0][0]
+        producto_id = ejecutar_consulta("SELECT last_insert_rowid()", fetch=True)[0][0]
         
         # Registrar movimiento inicial
         ejecutar_consulta(
@@ -119,30 +101,47 @@ def agregar_producto(nombre, stock, precio, costo):
             (producto_id, 'entrada', stock, 'Stock inicial')
         )
         
+        # Forzar actualización del estado
+        st.session_state.ultima_actualizacion = datetime.now()
         return True
     except Exception as e:
         st.error(f"Error al agregar producto: {str(e)}")
         return False
 
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
-    """Actualiza los datos de un producto existente"""
-    return ejecutar_consulta(
-        "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
-        (nombre, stock, precio, costo, id_producto)
-    )
+    """Actualiza un producto con manejo de estado"""
+    try:
+        if not ejecutar_consulta(
+            "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
+            (nombre, stock, precio, costo, id_producto)
+        ):
+            return False
+        
+        # Forzar actualización del estado
+        st.session_state.ultima_actualizacion = datetime.now()
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar producto: {str(e)}")
+        return False
 
 def eliminar_producto(id_producto):
-    """Elimina un producto de la base de datos"""
-    return ejecutar_consulta(
-        "DELETE FROM productos WHERE id=?",
-        (id_producto,)
-    )
+    """Elimina un producto con actualización de estado"""
+    try:
+        if not ejecutar_consulta("DELETE FROM productos WHERE id=?", (id_producto,)):
+            return False
+        
+        # Forzar actualización del estado
+        st.session_state.ultima_actualizacion = datetime.now()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar producto: {str(e)}")
+        return False
 
 def ajustar_stock(id_producto, cantidad, tipo='salida', nota=""):
-    """Ajusta el stock de un producto"""
+    """Ajusta el stock con actualización de estado"""
     try:
-        # Actualizar stock
         operador = '+' if tipo == 'entrada' else '-'
+        
         if not ejecutar_consulta(
             f"UPDATE productos SET stock = stock {operador} ? WHERE id=?",
             (cantidad, id_producto)
@@ -155,17 +154,22 @@ def ajustar_stock(id_producto, cantidad, tipo='salida', nota=""):
             (id_producto, tipo, cantidad, nota)
         )
         
+        # Forzar actualización del estado
+        st.session_state.ultima_actualizacion = datetime.now()
         return True
     except Exception as e:
         st.error(f"Error al ajustar stock: {str(e)}")
         return False
 
 # ------------------------------------------
-# INTERFAZ DE USUARIO
+# INTERFAZ DE USUARIO CON ACTUALIZACIÓN AUTOMÁTICA
 # ------------------------------------------
 
 def mostrar_inventario():
-    st.header("📋 Inventario Actual")
+    """Muestra el inventario actual con auto-actualización"""
+    # Verificar si necesitamos actualizar
+    if 'ultima_actualizacion' not in st.session_state:
+        st.session_state.ultima_actualizacion = datetime.now()
     
     productos = obtener_productos()
     
@@ -188,9 +192,9 @@ def mostrar_inventario():
             'Costo Total': '${:,.2f}',
             'Margen': '${:,.2f}',
             'Margen %': '{:.2f}%'
-        })),
-    use_container_width=True,
-    height=min(400, 35 + 35 * len(productos))
+        }),
+        use_container_width=True,
+        height=min(400, 35 + 35 * len(productos))
     
     # Resumen estadístico
     st.subheader("📊 Resumen del Inventario")
@@ -201,6 +205,7 @@ def mostrar_inventario():
     cols[3].metric("Margen Promedio", f"{productos['Margen %'].mean():.2f}%")
 
 def mostrar_formulario_agregar():
+    """Formulario para agregar productos con auto-actualización"""
     st.header("➕ Agregar Nuevo Producto")
     
     with st.form("form_agregar", clear_on_submit=True):
@@ -223,9 +228,10 @@ def mostrar_formulario_agregar():
                 
             if agregar_producto(nombre, stock, precio, costo):
                 st.success("¡Producto agregado correctamente!")
-                st.rerun()
+                st.experimental_rerun()
 
 def mostrar_formulario_editar():
+    """Formulario para editar productos con auto-actualización"""
     st.header("✏️ Editar Producto")
     
     productos = obtener_productos()
@@ -236,7 +242,8 @@ def mostrar_formulario_editar():
     
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
-        productos['nombre']
+        productos['nombre'],
+        key="select_editar"
     )
     
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
@@ -261,9 +268,10 @@ def mostrar_formulario_editar():
                 
             if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                 st.success("¡Producto actualizado correctamente!")
-                st.rerun()
+                st.experimental_rerun()
 
 def mostrar_formulario_eliminar():
+    """Formulario para eliminar productos con auto-actualización"""
     st.header("🗑️ Eliminar Producto")
     
     productos = obtener_productos()
@@ -274,7 +282,8 @@ def mostrar_formulario_eliminar():
     
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
-        productos['nombre']
+        productos['nombre'],
+        key="select_eliminar"
     )
     
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
@@ -287,12 +296,13 @@ def mostrar_formulario_eliminar():
         st.write(f"**Precio:** ${producto['precio']:.2f}")
         st.write(f"**Costo:** ${producto['costo']:.2f}")
     
-    if st.button("Confirmar Eliminación", type="primary"):
+    if st.button("Confirmar Eliminación", type="primary", key="btn_eliminar"):
         if eliminar_producto(producto['id']):
             st.success("¡Producto eliminado correctamente!")
-            st.rerun()
+            st.experimental_rerun()
 
 def mostrar_formulario_ajuste_stock():
+    """Formulario para ajustar stock con auto-actualización"""
     st.header("🔄 Ajustar Stock")
     
     productos = obtener_productos()
@@ -303,7 +313,8 @@ def mostrar_formulario_ajuste_stock():
     
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
-        productos['nombre']
+        productos['nombre'],
+        key="select_ajustar"
     )
     
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
@@ -313,6 +324,7 @@ def mostrar_formulario_ajuste_stock():
     tipo_ajuste = st.radio(
         "Tipo de ajuste:",
         ["Entrada (+)", "Salida (-)"],
+        key="radio_ajuste",
         horizontal=True
     )
     
@@ -320,60 +332,44 @@ def mostrar_formulario_ajuste_stock():
         "Cantidad*",
         min_value=1,
         max_value=10000 if tipo_ajuste == "Entrada (+)" else producto['stock'],
-        value=1
+        value=1,
+        key="num_ajuste"
     )
     
-    nota = st.text_input("Nota (opcional)")
+    nota = st.text_input("Nota (opcional)", key="nota_ajuste")
     
-    if st.button("Aplicar Ajuste", type="primary"):
+    if st.button("Aplicar Ajuste", type="primary", key="btn_ajuste"):
         tipo = 'entrada' if tipo_ajuste == "Entrada (+)" else 'salida'
-        
         if ajustar_stock(producto['id'], cantidad, tipo, nota):
             st.success(f"¡Stock actualizado! ({tipo_ajuste} de {cantidad} unidades)")
-            st.rerun()
-
-def mostrar_historial():
-    st.header("📜 Historial de Movimientos")
-    
-    movimientos = obtener_movimientos()
-    
-    if movimientos.empty:
-        st.warning("No hay movimientos registrados")
-        return
-    
-    movimientos['Valor'] = movimientos['cantidad'] * movimientos['precio']
-    
-    st.dataframe(
-        movimientos.style.format({
-            'precio': '${:,.2f}',
-            'Valor': '${:,.2f}'
-        }),
-        use_container_width=True
-    )
+            st.experimental_rerun()
 
 # ------------------------------------------
-# MENÚ PRINCIPAL
+# CONFIGURACIÓN DEL MENÚ PRINCIPAL
 # ------------------------------------------
 
 def main():
-    init_db()  # Asegurar que la base de datos existe
+    # Inicializar la base de datos
+    init_db()
     
+    # Configurar el menú de opciones
     menu_options = {
         "Ver Inventario": mostrar_inventario,
         "Agregar Producto": mostrar_formulario_agregar,
         "Editar Producto": mostrar_formulario_editar,
         "Eliminar Producto": mostrar_formulario_eliminar,
-        "Ajustar Stock": mostrar_formulario_ajuste_stock,
-        "Historial": mostrar_historial
+        "Ajustar Stock": mostrar_formulario_ajuste_stock
     }
     
     with st.sidebar:
         st.title("Menú Principal")
         selected = st.radio(
             "Seleccione una opción:",
-            list(menu_options.keys())
+            list(menu_options.keys()),
+            key="main_menu"
         )
     
+    # Mostrar la opción seleccionada
     menu_options[selected]()
 
 if __name__ == "__main__":
