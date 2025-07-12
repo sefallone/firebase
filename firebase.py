@@ -358,8 +358,8 @@ def mostrar_historial():
             'precio': '${:,.2f}',
             'Valor': '${:,.2f}'
         })),
-        use_container_width=True,
-        height=min(400, 35 + 35 * len(movimientos))  # Altura dinámica
+    use_container_width=True,
+    height=min(400, 35 + 35 * len(movimientos))  # Altura dinámica
 
 ## ------------------------------------------
 ## MENÚ PRINCIPAL
