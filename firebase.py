@@ -191,19 +191,19 @@ def mostrar_inventario():
 
 def formulario_agregar_producto():
     st.header("Agregar Nuevo Producto")
-    with st.form("form_agregar"):
-        nombre = st.text_input("Nombre del Producto*")
-        col1, col2 = st.columns(2)
-        stock = col1.number_input("Stock Inicial*", min_value=0, value=0)
-        precio = col1.number_input("Precio de Venta*", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-        costo = col2.number_input("Costo del Producto*", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-        
-        if st.form_submit_button("Agregar Producto"):
-            if nombre and precio > 0 and costo >= 0:
-                agregar_producto(nombre, stock, precio, costo)
-                st.experimental_rerun()
-            else:
-                st.error("Complete todos los campos obligatorios (*)")
+    nombre = st.text_input("Nombre del Producto*", key="nombre_input")
+    col1, col2 = st.columns(2)
+    stock = col1.number_input("Stock Inicial*", min_value=0, value=0, key="stock_input")
+    precio = col1.number_input("Precio de Venta*", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="precio_input")
+    costo = col2.number_input("Costo del Producto*", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="costo_input")
+    
+    if st.button("Agregar Producto", key="agregar_btn"):
+        if nombre and precio > 0 and costo >= 0:
+            agregar_producto(nombre, stock, precio, costo)
+            st.success("¡Producto agregado!") 
+            # No se necesita rerun si usamos keys únicos
+        else:
+            st.error("Complete todos los campos obligatorios (*)")
 
 def formulario_editar_producto():
     st.header("Editar Producto")
