@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import gspread
@@ -10,28 +11,30 @@ st.title("📦 Sistema de Gestión de Inventario en la Nube")
 # Conexión con Google Sheets
 @st.cache_resource()
 def get_gsheet_connection():
+    """Establece la conexión con Google Sheets"""
     credentials = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
     return gspread.authorize(credentials)
 
+@st.cache_resource()
 def get_worksheet():
+    """Obtiene la hoja de cálculo específica"""
     client = get_gsheet_connection()
-    sheet = client.open_by_key(st.secrets["private_gsheets_url"]).worksheet("Inventario")
-    return sheet
+    return client.open_by_key(st.secrets["private_gsheets_url"]).worksheet("Inventario")
 
 def load_inventario():
+    """Carga los datos desde Google Sheets a un DataFrame"""
     sheet = get_worksheet()
     records = sheet.get_all_records()
     return pd.DataFrame(records)
 
 def save_inventario(df):
+    """Guarda el DataFrame completo en Google Sheets"""
     sheet = get_worksheet()
-    
     # Preparar datos
     data = [df.columns.tolist()] + df.fillna('').values.tolist()
-    
     # Actualizar toda la hoja de una vez
     sheet.update('A1', data)
 
@@ -49,26 +52,27 @@ if 'inventario' not in st.session_state:
         st.session_state.inventario = pd.DataFrame(columns=[
             'Nombre del Producto', 'Stock', 'Precio', 'Costo'
         ])
-# Función para agregar un nuevo producto
+
+# Función para agregar un nuevo producto (CORREGIDA)
 def agregar_producto(nombre, stock, precio, costo):
     try:
         nuevo_producto = pd.DataFrame([[nombre, stock, precio, costo]], 
                                     columns=['Nombre del Producto', 'Stock', 'Precio', 'Costo'])
         st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_producto], ignore_index=True)
-        save_inventario(sheet, st.session_state.inventario)
+        save_inventario(st.session_state.inventario)  # Usamos save_inventario en lugar de sheet
         st.success(f"Producto '{nombre}' agregado correctamente!")
         st.experimental_rerun()
     except Exception as e:
         st.error(f"Error al agregar producto: {e}")
 
-# Función para eliminar un producto
+# Función para eliminar un producto (CORREGIDA)
 def eliminar_producto(nombre):
     try:
         if nombre in st.session_state.inventario['Nombre del Producto'].values:
             st.session_state.inventario = st.session_state.inventario[
                 st.session_state.inventario['Nombre del Producto'] != nombre
             ]
-            save_inventario(sheet, st.session_state.inventario)
+            save_inventario(st.session_state.inventario)  # Usamos save_inventario
             st.success(f"Producto '{nombre}' eliminado correctamente!")
             st.experimental_rerun()
         else:
