@@ -11,7 +11,7 @@ st.title("📦 Sistema de Gestión de Inventario")
 DB_FILE = "inventario.db"
 
 # ------------------------------------------
-# FUNCIONES DE BASE DE DATOS
+# FUNCIONES DE BASE DE DATOS (Mantenemos las últimas versiones correctas)
 # ------------------------------------------
 
 def init_db():
@@ -37,7 +37,6 @@ def get_connection():
     """Obtiene una conexión a la base de datos"""
     return sqlite3.connect(DB_FILE)
 
-# Esta función se mantiene para consultas simples o inicialización
 def ejecutar_consulta(query, params=()):
     """Ejecuta una consulta SQL con manejo de errores (para operaciones que no requieren transacción compleja)"""
     conn = get_connection()
@@ -61,68 +60,56 @@ def obtener_productos():
     finally:
         conn.close()
 
-# ------------------------------------------
-# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO
-# ------------------------------------------
-
 def agregar_producto(nombre, stock, precio, costo):
     """Agrega un nuevo producto a la base de datos, con verificación de duplicados."""
-    conn = get_connection() # Obtener la conexión una sola vez
+    conn = get_connection()
     try:
         c = conn.cursor()
-        
-        # 1. Verificar si el nombre ya existe
         c.execute("SELECT COUNT(*) FROM productos WHERE nombre=?", (nombre,))
         if c.fetchone()[0] > 0:
             st.error(f"Ya existe un producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
-            return False # No continuar si es duplicado
+            return False
             
-        # 2. Si no es duplicado, proceder con la inserción
         c.execute("INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
                   (nombre, stock, precio, costo))
-        conn.commit() # Confirmar la transacción
+        conn.commit()
         st.session_state.ultima_actualizacion = datetime.now()
         return True
     except sqlite3.Error as e:
         st.error(f"Error de base de datos al agregar producto: {str(e)}")
-        conn.rollback() # Revertir la transacción en caso de error
+        conn.rollback()
         return False
     finally:
-        conn.close() # Asegurarse de cerrar la conexión
+        conn.close()
 
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
     """Actualiza los datos de un producto existente, con verificación de duplicados."""
-    conn = get_connection() # Obtener la conexión una sola vez
+    conn = get_connection()
     try:
         c = conn.cursor()
-        
-        # 1. Verificar si el nuevo nombre ya existe en OTRO producto
-        # Se excluye el ID del producto que se está editando para permitir que conserve su propio nombre.
         c.execute("SELECT COUNT(*) FROM productos WHERE nombre=? AND id != ?", (nombre, id_producto))
         if c.fetchone()[0] > 0:
             st.error(f"Ya existe otro producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
-            return False # No continuar si es duplicado
+            return False
             
-        # 2. Si el nombre es único (o es el mismo nombre del producto que se edita), proceder con la actualización
         c.execute("UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
                   (nombre, stock, precio, costo, id_producto))
-        conn.commit() # Confirmar la transacción
+        conn.commit()
         st.session_state.ultima_actualizacion = datetime.now()
         return True
     except sqlite3.Error as e:
         st.error(f"Error de base de datos al actualizar producto: {str(e)}")
-        conn.rollback() # Revertir la transacción en caso de error
+        conn.rollback()
         return False
     finally:
-        conn.close() # Asegurarse de cerrar la conexión
+        conn.close()
 
 # ------------------------------------------
-# INTERFAZ DE USUARIO CON ACTUALIZACIÓN AUTOMÁTICA
+# INTERFAZ DE USUARIO (Mantenemos las últimas versiones correctas)
 # ------------------------------------------
 
 def mostrar_inventario():
     """Muestra el inventario actual con auto-actualización"""
-    # Usamos un marcador de tiempo para forzar la actualización
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
     
@@ -132,13 +119,11 @@ def mostrar_inventario():
         st.warning("No hay productos registrados.")
         return
     
-    # Calcular valores adicionales
     productos['Valor Total'] = productos['stock'] * productos['precio']
     productos['Costo Total'] = productos['stock'] * productos['costo']
     productos['Margen'] = productos['precio'] - productos['costo']
     productos['Margen %'] = (productos['Margen'] / productos['precio'] * 100).round(2)
     
-    # Mostrar tabla con formato
     st.dataframe(
         productos.style.format({
             'precio': '${:,.2f}',
@@ -170,11 +155,8 @@ def mostrar_formulario_agregar():
             else:
                 if agregar_producto(nombre, stock, precio, costo):
                     st.success("¡Producto agregado correctamente!")
-                    # Redirigir a "Ver Inventario" y forzar un rerun para ver los cambios
                     st.session_state.main_menu = "Ver Inventario"
                     st.experimental_rerun()
-                # Si agregar_producto falla (ej. duplicado), ya muestra el st.error.
-                # No se necesita un rerun en caso de fallo, el usuario permanece en el formulario.
 
 def mostrar_formulario_editar():
     """Formulario para editar productos existentes"""
@@ -184,26 +166,21 @@ def mostrar_formulario_editar():
     
     if productos.empty:
         st.warning("No hay productos para editar")
-        return # No hay productos, no hay nada que seleccionar
+        return
 
-    # Asegúrate de que el selectbox se inicializa con un valor si hay productos
     producto_seleccionado_nombre = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
         key="select_editar",
-        # Si la lista no está vacía, selecciona el primer elemento por defecto
         index=0 if not productos.empty else None
     )
     
-    # Si por alguna razón no se seleccionó nada (ej. lista se vació justo ahora), sal
     if producto_seleccionado_nombre is None:
         return
         
-    # Obtener el producto completo basado en el nombre seleccionado
     producto = productos[productos['nombre'] == producto_seleccionado_nombre].iloc[0]
     
     with st.form("form_editar"):
-        # Asegúrate de que los valores iniciales se toman del producto seleccionado
         nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'], key="nombre_edit")
         col1, col2 = st.columns(2)
         nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'], key="stock_edit")
@@ -216,17 +193,13 @@ def mostrar_formulario_editar():
             elif nuevo_precio <= 0 or nuevo_costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
             else:
-                # Pasa el ID del producto para la actualización
                 if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                     st.success("¡Producto actualizado correctamente!")
-                    # Redirigir a "Ver Inventario" y forzar un rerun para ver los cambios
                     st.session_state.main_menu = "Ver Inventario"
                     st.experimental_rerun()
-                # Si actualizar_producto falla (ej. duplicado), ya muestra el st.error.
-                # No se necesita un rerun en caso de fallo, el usuario permanece en el formulario.
 
 # ------------------------------------------
-# MENÚ PRINCIPAL
+# MENÚ PRINCIPAL (REVISADO)
 # ------------------------------------------
 
 def main():
@@ -237,9 +210,10 @@ def main():
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
     
-    # Inicializar la selección del menú si no existe, o si es la primera vez que se carga
+    # Inicializar la selección del menú si no existe
+    # Esto DEBE hacerse antes de usar st.session_state.main_menu en st.radio
     if 'main_menu' not in st.session_state:
-        st.session_state.main_menu = "Ver Inventario"
+        st.session_state.main_menu = "Ver Inventario" # Valor predeterminado al iniciar la app
 
     menu_options = {
         "Ver Inventario": mostrar_inventario,
@@ -249,17 +223,17 @@ def main():
     
     with st.sidebar:
         st.title("Menú Principal")
-        # El st.radio ahora se enlaza directamente a st.session_state.main_menu
+        # Aquí asignamos el valor devuelto por st.radio a la variable de estado
+        # El 'index' se calcula usando el valor actual de st.session_state.main_menu
+        # Esto asegura que el widget se inicialice correctamente y que el estado sea consistente
         st.session_state.main_menu = st.radio(
             "Seleccione una opción:",
             list(menu_options.keys()),
-            key="main_menu", # Usamos la misma clave para que el widget y el estado estén sincronizados
+            key="main_menu_radio", # Cambié la clave del widget para evitar posibles conflictos
             index=list(menu_options.keys()).index(st.session_state.main_menu)
         )
     
     # Ejecutar la función de la opción seleccionada
-    # Ya no necesitamos el `action_performed` flag aquí,
-    # el rerun se maneja dentro de las funciones de formulario.
     menu_options[st.session_state.main_menu]()
 
 
