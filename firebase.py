@@ -1,42 +1,89 @@
-
 import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2 import service_account
+import json
+import os
+from dotenv import load_dotenv
 
-# Configuración de la página
+# Configuración inicial
 st.set_page_config(page_title="Sistema de Inventario", layout="wide")
-st.title("📦 Sistema de Gestión de Inventario en la Nube")
+st.title("📦 Sistema de Gestión de Inventario")
+
+# Carga de variables de entorno (para desarrollo local)
+load_dotenv()
+
+# Detectar ambiente
+IS_CLOUD = 'HOSTNAME' in os.environ and 'streamlit.app' in os.environ['HOSTNAME']
+
+# Función para obtener credenciales
+def get_credenciales():
+    if IS_CLOUD:
+        # En Streamlit Cloud usa secrets
+        return {
+            "type": st.secrets["gcp_service_account"]["type"],
+            "project_id": st.secrets["gcp_service_account"]["project_id"],
+            "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
+            "private_key": st.secrets["gcp_service_account"]["private_key"],
+            "client_email": st.secrets["gcp_service_account"]["client_email"],
+            "client_id": st.secrets["gcp_service_account"]["client_id"],
+            "auth_uri": st.secrets["gcp_service_account"]["auth_uri"],
+            "token_uri": st.secrets["gcp_service_account"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"]
+        }
+    else:
+        # Localmente usa archivo JSON
+        with open('service_account.json') as f:
+            return json.load(f)
 
 # Conexión con Google Sheets
 @st.cache_resource()
-def get_gsheet_connection():
-    """Establece la conexión con Google Sheets"""
-    credentials = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
-    return gspread.authorize(credentials)
+def conectar_google_sheets():
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            get_credenciales(),
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        return gspread.authorize(creds)
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
+        st.stop()
 
 @st.cache_resource()
-def get_worksheet():
-    """Obtiene la hoja de cálculo específica"""
-    client = get_gsheet_connection()
-    return client.open_by_key(st.secrets["private_gsheets_url"]).worksheet("Inventario")
+def obtener_hoja():
+    try:
+        gc = conectar_google_sheets()
+        sheet_id = st.secrets["private_gsheets_url"]["key"] if IS_CLOUD else os.getenv("SHEET_ID")
+        return gc.open_by_key(sheet_id).worksheet("Inventario")
+    except Exception as e:
+        st.error(f"Error al acceder a la hoja: {str(e)}")
+        st.stop()
 
-def load_inventario():
-    """Carga los datos desde Google Sheets a un DataFrame"""
-    sheet = get_worksheet()
-    records = sheet.get_all_records()
-    return pd.DataFrame(records)
+# Funciones principales
+def cargar_inventario():
+    hoja = obtener_hoja()
+    return pd.DataFrame(hoja.get_all_records())
 
-def save_inventario(df):
-    """Guarda el DataFrame completo en Google Sheets"""
-    sheet = get_worksheet()
-    # Preparar datos
-    data = [df.columns.tolist()] + df.fillna('').values.tolist()
-    # Actualizar toda la hoja de una vez
-    sheet.update('A1', data)
+def guardar_inventario(df):
+    hoja = obtener_hoja()
+    datos = [df.columns.tolist()] + df.values.tolist()
+    hoja.update('A1', datos)
+
+# Inicialización
+if 'inventario' not in st.session_state:
+    try:
+        st.session_state.inventario = cargar_inventario()
+        if st.session_state.inventario.empty:
+            st.session_state.inventario = pd.DataFrame(columns=[
+                'Producto', 'Stock', 'Precio', 'Costo'
+            ])
+            guardar_inventario(st.session_state.inventario)
+    except Exception as e:
+        st.error(f"Error inicial: {str(e)}")
+        st.session_state.inventario = pd.DataFrame(columns=[
+            'Producto', 'Stock', 'Precio', 'Costo'
+        ])
 
 # Inicializar inventario
 if 'inventario' not in st.session_state:
