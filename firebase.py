@@ -1,329 +1,346 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from google.oauth2 import service_account
-import json
+import sqlite3
+from datetime import datetime
 import os
-from dotenv import load_dotenv
 
-# Configuración inicial
+# Configuración de la página
 st.set_page_config(page_title="Sistema de Inventario", layout="wide")
 st.title("📦 Sistema de Gestión de Inventario")
 
-# Carga de variables de entorno (para desarrollo local)
-load_dotenv()
+# Configuración de la base de datos
+DB_FILE = "inventario.db"
 
-# Detectar ambiente
-IS_CLOUD = 'HOSTNAME' in os.environ and 'streamlit.app' in os.environ['HOSTNAME']
-
-# Función para obtener credenciales
-def get_credenciales():
-    if IS_CLOUD:
-        # En Streamlit Cloud usa secrets
-        return {
-            "type": st.secrets["gcp_service_account"]["type"],
-            "project_id": st.secrets["gcp_service_account"]["project_id"],
-            "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
-            "private_key": st.secrets["gcp_service_account"]["private_key"],
-            "client_email": st.secrets["gcp_service_account"]["client_email"],
-            "client_id": st.secrets["gcp_service_account"]["client_id"],
-            "auth_uri": st.secrets["gcp_service_account"]["auth_uri"],
-            "token_uri": st.secrets["gcp_service_account"]["token_uri"],
-            "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
-            "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"]
-        }
-    else:
-        # Localmente usa archivo JSON
-        with open('service_account.json') as f:
-            return json.load(f)
-
-# Conexión con Google Sheets
-@st.cache_resource()
-def conectar_google_sheets():
-    try:
-        creds = service_account.Credentials.from_service_account_info(
-            get_credenciales(),
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+def init_db():
+    """Inicializa la base de datos si no existe"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Tabla de productos
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS productos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL,
+            stock INTEGER NOT NULL DEFAULT 0,
+            precio REAL NOT NULL,
+            costo REAL NOT NULL,
+            fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"Error de conexión: {str(e)}")
-        st.stop()
+    ''')
+    
+    # Tabla de movimientos (historial)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS movimientos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_id INTEGER,
+            tipo TEXT NOT NULL,  -- 'entrada' o 'salida'
+            cantidad INTEGER NOT NULL,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (producto_id) REFERENCES productos (id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-@st.cache_resource()
-def obtener_hoja():
-    try:
-        gc = conectar_google_sheets()
-        sheet_id = st.secrets["private_gsheets_url"]["key"] if IS_CLOUD else os.getenv("SHEET_ID")
-        return gc.open_by_key(sheet_id).worksheet("Inventario")
-    except Exception as e:
-        st.error(f"Error al acceder a la hoja: {str(e)}")
-        st.stop()
+def get_connection():
+    """Obtiene una conexión a la base de datos"""
+    return sqlite3.connect(DB_FILE)
+
+# Inicializar la base de datos
+init_db()
 
 # Funciones principales
-def cargar_inventario():
-    hoja = obtener_hoja()
-    return pd.DataFrame(hoja.get_all_records())
-
-def guardar_inventario(df):
-    hoja = obtener_hoja()
-    datos = [df.columns.tolist()] + df.values.tolist()
-    hoja.update('A1', datos)
-
-# Inicialización
-if 'inventario' not in st.session_state:
-    try:
-        st.session_state.inventario = cargar_inventario()
-        if st.session_state.inventario.empty:
-            st.session_state.inventario = pd.DataFrame(columns=[
-                'Producto', 'Stock', 'Precio', 'Costo'
-            ])
-            guardar_inventario(st.session_state.inventario)
-    except Exception as e:
-        st.error(f"Error inicial: {str(e)}")
-        st.session_state.inventario = pd.DataFrame(columns=[
-            'Producto', 'Stock', 'Precio', 'Costo'
-        ])
-
-# Inicializar inventario
-if 'inventario' not in st.session_state:
-    try:
-        st.session_state.inventario = load_inventario()
-        if st.session_state.inventario.empty:
-            st.session_state.inventario = pd.DataFrame(columns=[
-                'Nombre del Producto', 'Stock', 'Precio', 'Costo'
-            ])
-            save_inventario(st.session_state.inventario)
-    except Exception as e:
-        st.error(f"Error al cargar inventario: {e}")
-        st.session_state.inventario = pd.DataFrame(columns=[
-            'Nombre del Producto', 'Stock', 'Precio', 'Costo'
-        ])
-
-# Función para agregar un nuevo producto (CORREGIDA)
 def agregar_producto(nombre, stock, precio, costo):
+    """Agrega un nuevo producto a la base de datos"""
     try:
-        nuevo_producto = pd.DataFrame([[nombre, stock, precio, costo]], 
-                                    columns=['Nombre del Producto', 'Stock', 'Precio', 'Costo'])
-        st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_producto], ignore_index=True)
-        save_inventario(st.session_state.inventario)  # Usamos save_inventario en lugar de sheet
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
+            (nombre, stock, precio, costo)
+        )
+        # Registrar movimiento inicial
+        producto_id = c.lastrowid
+        c.execute(
+            "INSERT INTO movimientos (producto_id, tipo, cantidad) VALUES (?, ?, ?)",
+            (producto_id, 'entrada', stock)
+        )
+        conn.commit()
         st.success(f"Producto '{nombre}' agregado correctamente!")
-        st.experimental_rerun()
+    except sqlite3.IntegrityError:
+        st.error(f"Error: Ya existe un producto con el nombre '{nombre}'")
     except Exception as e:
-        st.error(f"Error al agregar producto: {e}")
+        st.error(f"Error al agregar producto: {str(e)}")
+    finally:
+        conn.close()
 
-# Función para eliminar un producto (CORREGIDA)
-def eliminar_producto(nombre):
+def actualizar_producto(id_producto, nombre, stock, precio, costo):
+    """Actualiza los datos de un producto existente"""
     try:
-        if nombre in st.session_state.inventario['Nombre del Producto'].values:
-            st.session_state.inventario = st.session_state.inventario[
-                st.session_state.inventario['Nombre del Producto'] != nombre
-            ]
-            save_inventario(st.session_state.inventario)  # Usamos save_inventario
-            st.success(f"Producto '{nombre}' eliminado correctamente!")
-            st.experimental_rerun()
-        else:
-            st.error(f"Producto '{nombre}' no encontrado en el inventario.")
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
+            (nombre, stock, precio, costo, id_producto)
+        )
+        conn.commit()
+        st.success("Producto actualizado correctamente!")
     except Exception as e:
-        st.error(f"Error al eliminar producto: {e}")
+        st.error(f"Error al actualizar producto: {str(e)}")
+    finally:
+        conn.close()
 
-# Función para editar un producto
-def editar_producto(nombre_original, nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
+def eliminar_producto(id_producto):
+    """Elimina un producto de la base de datos"""
     try:
-        if nombre_original in st.session_state.inventario['Nombre del Producto'].values:
-            idx = st.session_state.inventario[
-                st.session_state.inventario['Nombre del Producto'] == nombre_original
-            ].index[0]
-            
-            st.session_state.inventario.at[idx, 'Nombre del Producto'] = nuevo_nombre
-            st.session_state.inventario.at[idx, 'Stock'] = nuevo_stock
-            st.session_state.inventario.at[idx, 'Precio'] = nuevo_precio
-            st.session_state.inventario.at[idx, 'Costo'] = nuevo_costo
-            
-            save_inventario(sheet, st.session_state.inventario)
-            st.success(f"Producto '{nombre_original}' actualizado correctamente!")
-            st.experimental_rerun()
-        else:
-            st.error(f"Producto '{nombre_original}' no encontrado en el inventario.")
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM productos WHERE id=?", (id_producto,))
+        conn.commit()
+        st.success("Producto eliminado correctamente!")
     except Exception as e:
-        st.error(f"Error al editar producto: {e}")
+        st.error(f"Error al eliminar producto: {str(e)}")
+    finally:
+        conn.close()
 
-# Función para sustraer stock
-def sustraer_stock(nombre, cantidad):
+def ajustar_stock(id_producto, cantidad, tipo='salida'):
+    """Ajusta el stock de un producto (entrada o salida)"""
     try:
-        if nombre in st.session_state.inventario['Nombre del Producto'].values:
-            idx = st.session_state.inventario[
-                st.session_state.inventario['Nombre del Producto'] == nombre
-            ].index[0]
-            
-            stock_actual = st.session_state.inventario.at[idx, 'Stock']
-            
-            if stock_actual >= cantidad:
-                st.session_state.inventario.at[idx, 'Stock'] = stock_actual - cantidad
-                save_inventario(sheet, st.session_state.inventario)
-                st.success(f"Se sustrajeron {cantidad} unidades de '{nombre}'. Stock restante: {stock_actual - cantidad}")
-                st.experimental_rerun()
-            else:
-                st.error(f"No hay suficiente stock de '{nombre}'. Stock actual: {stock_actual}")
-        else:
-            st.error(f"Producto '{nombre}' no encontrado en el inventario.")
-    except Exception as e:
-        st.error(f"Error al sustraer stock: {e}")
-
-# Sidebar para operaciones
-with st.sidebar:
-    st.header("Operaciones de Inventario")
-    opcion = st.radio(
-        "Seleccione una operación:",
-        ["Ver Inventario", "Agregar Producto", "Editar Producto", "Eliminar Producto", "Sustraer Stock"]
-    )
-
-# Mostrar inventario
-if opcion == "Ver Inventario":
-    st.header("📋 Inventario Actual")
-    
-    if st.session_state.inventario.empty:
-        st.warning("El inventario está vacío.")
-    else:
-        # Calcular valor total y margen
-        inventario = st.session_state.inventario.copy()
-        inventario['Valor Total'] = inventario['Stock'] * inventario['Precio']
-        inventario['Costo Total'] = inventario['Stock'] * inventario['Costo']
-        inventario['Margen'] = inventario['Precio'] - inventario['Costo']
-        inventario['Margen %'] = ((inventario['Precio'] - inventario['Costo']) / inventario['Precio'] * 100).round(2)
+        conn = get_connection()
+        c = conn.cursor()
         
-        st.dataframe(inventario.style.format({
-            'Precio': '${:,.2f}',
-            'Costo': '${:,.2f}',
+        # Actualizar stock
+        if tipo == 'entrada':
+            c.execute(
+                "UPDATE productos SET stock = stock + ? WHERE id=?",
+                (cantidad, id_producto)
+            )
+        else:  # salida
+            c.execute(
+                "UPDATE productos SET stock = stock - ? WHERE id=?",
+                (cantidad, id_producto)
+            )
+        
+        # Registrar movimiento
+        c.execute(
+            "INSERT INTO movimientos (producto_id, tipo, cantidad) VALUES (?, ?, ?)",
+            (id_producto, tipo, cantidad)
+        )
+        
+        conn.commit()
+        st.success(f"Stock actualizado correctamente ({tipo} de {cantidad} unidades)")
+    except Exception as e:
+        st.error(f"Error al ajustar stock: {str(e)}")
+    finally:
+        conn.close()
+
+def obtener_productos():
+    """Obtiene todos los productos como DataFrame"""
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM productos ORDER BY nombre", conn)
+    conn.close()
+    return df
+
+def obtener_movimientos():
+    """Obtiene el historial de movimientos"""
+    conn = get_connection()
+    df = pd.read_sql('''
+        SELECT m.fecha, p.nombre, m.tipo, m.cantidad, p.precio 
+        FROM movimientos m
+        JOIN productos p ON m.producto_id = p.id
+        ORDER BY m.fecha DESC
+    ''', conn)
+    conn.close()
+    return df
+
+# Interfaz de usuario
+def mostrar_inventario():
+    st.header("Inventario Actual")
+    productos = obtener_productos()
+    
+    if productos.empty:
+        st.warning("No hay productos registrados.")
+        return
+    
+    # Calcular valores adicionales
+    productos['Valor Total'] = productos['stock'] * productos['precio']
+    productos['Costo Total'] = productos['stock'] * productos['costo']
+    productos['Margen'] = productos['precio'] - productos['costo']
+    productos['Margen %'] = (productos['Margen'] / productos['precio'] * 100).round(2)
+    
+    st.dataframe(
+        productos.style.format({
+            'precio': '${:,.2f}',
+            'costo': '${:,.2f}',
             'Valor Total': '${:,.2f}',
             'Costo Total': '${:,.2f}',
             'Margen': '${:,.2f}',
             'Margen %': '{:.2f}%'
-        }), use_container_width=True)
-        
-        # Resumen
-        st.subheader("📊 Resumen del Inventario")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Productos", len(inventario))
-        col2.metric("Valor Total Inventario", f"${inventario['Valor Total'].sum():,.2f}")
-        col3.metric("Costo Total Inventario", f"${inventario['Costo Total'].sum():,.2f}")
-        col4.metric("Margen Promedio", f"{inventario['Margen %'].mean():.2f}%")
-
-# Agregar producto
-elif opcion == "Agregar Producto":
-    st.header("➕ Agregar Nuevo Producto")
+        }),
+        use_container_width=True
+    )
     
-    with st.form("agregar_producto_form"):
-        nombre = st.text_input("Nombre del Producto*", key="add_nombre")
+    # Resumen
+    st.subheader("Resumen del Inventario")
+    cols = st.columns(4)
+    cols[0].metric("Total Productos", len(productos))
+    cols[1].metric("Valor Total", f"${productos['Valor Total'].sum():,.2f}")
+    cols[2].metric("Costo Total", f"${productos['Costo Total'].sum():,.2f}")
+    cols[3].metric("Margen Promedio", f"{productos['Margen %'].mean():.2f}%")
+
+def formulario_agregar_producto():
+    st.header("Agregar Nuevo Producto")
+    with st.form("form_agregar"):
+        nombre = st.text_input("Nombre del Producto*")
         col1, col2 = st.columns(2)
-        stock = col1.number_input("Stock Inicial*", min_value=0, step=1, key="add_stock")
-        precio = col1.number_input("Precio de Venta*", min_value=0.0, step=0.01, format="%.2f", key="add_precio")
-        costo = col2.number_input("Costo del Producto*", min_value=0.0, step=0.01, format="%.2f", key="add_costo")
+        stock = col1.number_input("Stock Inicial*", min_value=0, value=0)
+        precio = col1.number_input("Precio de Venta*", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+        costo = col2.number_input("Costo del Producto*", min_value=0.0, value=0.0, step=0.01, format="%.2f")
         
-        submitted = st.form_submit_button("Agregar Producto")
-        if submitted:
-            if nombre.strip() and stock >=0 and precio >=0 and costo >=0:
-                if nombre not in st.session_state.inventario['Nombre del Producto'].values:
-                    agregar_producto(nombre, stock, precio, costo)
-                else:
-                    st.error("Ya existe un producto con ese nombre.")
+        if st.form_submit_button("Agregar Producto"):
+            if nombre and precio > 0 and costo >= 0:
+                agregar_producto(nombre, stock, precio, costo)
+                st.experimental_rerun()
             else:
-                st.error("Por favor complete todos los campos obligatorios (*) correctamente.")
+                st.error("Complete todos los campos obligatorios (*)")
 
-# Editar producto
-elif opcion == "Editar Producto":
-    st.header("✏️ Editar Producto Existente")
+def formulario_editar_producto():
+    st.header("Editar Producto")
+    productos = obtener_productos()
     
-    if st.session_state.inventario.empty:
-        st.warning("No hay productos para editar. El inventario está vacío.")
-    else:
-        producto_a_editar = st.selectbox(
-            "Seleccione el producto a editar:",
-            st.session_state.inventario['Nombre del Producto'].values,
-            key="select_edit"
-        )
+    if productos.empty:
+        st.warning("No hay productos para editar")
+        return
+    
+    producto_seleccionado = st.selectbox(
+        "Seleccione un producto:",
+        productos['nombre'],
+        key="select_editar"
+    )
+    
+    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
+    
+    with st.form("form_editar"):
+        nuevo_nombre = st.text_input("Nombre", value=producto['nombre'])
+        col1, col2 = st.columns(2)
+        nuevo_stock = col1.number_input("Stock", min_value=0, value=producto['stock'])
+        nuevo_precio = col1.number_input("Precio", min_value=0.0, value=producto['precio'], step=0.01, format="%.2f")
+        nuevo_costo = col2.number_input("Costo", min_value=0.0, value=producto['costo'], step=0.01, format="%.2f")
         
-        producto_data = st.session_state.inventario[
-            st.session_state.inventario['Nombre del Producto'] == producto_a_editar
-        ].iloc[0]
-        
-        with st.form("editar_producto_form"):
-            nuevo_nombre = st.text_input("Nombre del Producto*", value=producto_data['Nombre del Producto'], key="edit_nombre")
-            col1, col2 = st.columns(2)
-            nuevo_stock = col1.number_input("Stock*", min_value=0, step=1, value=producto_data['Stock'], key="edit_stock")
-            nuevo_precio = col1.number_input("Precio de Venta*", min_value=0.0, step=0.01, format="%.2f", 
-                                          value=producto_data['Precio'], key="edit_precio")
-            nuevo_costo = col2.number_input("Costo del Producto*", min_value=0.0, step=0.01, format="%.2f", 
-                                         value=producto_data['Costo'], key="edit_costo")
-            
-            submitted = st.form_submit_button("Actualizar Producto")
-            if submitted:
-                if nuevo_nombre.strip() and nuevo_stock >=0 and nuevo_precio >=0 and nuevo_costo >=0:
-                    if nuevo_nombre == producto_a_editar or nuevo_nombre not in st.session_state.inventario['Nombre del Producto'].values:
-                        editar_producto(producto_a_editar, nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo)
-                    else:
-                        st.error("Ya existe otro producto con ese nombre.")
-                else:
-                    st.error("Por favor complete todos los campos obligatorios (*) correctamente.")
+        if st.form_submit_button("Actualizar Producto"):
+            if nuevo_nombre and nuevo_precio > 0 and nuevo_costo >= 0:
+                actualizar_producto(
+                    producto['id'],
+                    nuevo_nombre,
+                    nuevo_stock,
+                    nuevo_precio,
+                    nuevo_costo
+                )
+                st.experimental_rerun()
+            else:
+                st.error("Complete todos los campos obligatorios")
 
-# Eliminar producto
-elif opcion == "Eliminar Producto":
-    st.header("🗑️ Eliminar Producto")
+def formulario_eliminar_producto():
+    st.header("Eliminar Producto")
+    productos = obtener_productos()
     
-    if st.session_state.inventario.empty:
-        st.warning("No hay productos para eliminar. El inventario está vacío.")
-    else:
-        producto_a_eliminar = st.selectbox(
-            "Seleccione el producto a eliminar:",
-            st.session_state.inventario['Nombre del Producto'].values,
-            key="select_delete"
-        )
-        
-        producto_data = st.session_state.inventario[
-            st.session_state.inventario['Nombre del Producto'] == producto_a_eliminar
-        ].iloc[0]
-        
-        st.warning(f"¿Está seguro que desea eliminar permanentemente este producto?")
-        
-        st.info(f"""
-        **Detalles del producto:**
-        - Nombre: {producto_data['Nombre del Producto']}
-        - Stock actual: {producto_data['Stock']}
-        - Precio: ${producto_data['Precio']:,.2f}
-        - Costo: ${producto_data['Costo']:,.2f}
-        """)
-        
-        if st.button("Confirmar Eliminación"):
-            eliminar_producto(producto_a_eliminar)
+    if productos.empty:
+        st.warning("No hay productos para eliminar")
+        return
+    
+    producto_seleccionado = st.selectbox(
+        "Seleccione un producto:",
+        productos['nombre'],
+        key="select_eliminar"
+    )
+    
+    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
+    
+    st.warning(f"¿Está seguro que desea eliminar permanentemente este producto?")
+    st.json({
+        "Nombre": producto['nombre'],
+        "Stock actual": producto['stock'],
+        "Precio": f"${producto['precio']:,.2f}",
+        "Costo": f"${producto['costo']:,.2f}"
+    })
+    
+    if st.button("Confirmar Eliminación"):
+        eliminar_producto(producto['id'])
+        st.experimental_rerun()
 
-# Sustraer stock
-elif opcion == "Sustraer Stock":
-    st.header("➖ Sustraer Stock")
+def formulario_ajustar_stock():
+    st.header("Ajustar Stock")
+    productos = obtener_productos()
     
-    if st.session_state.inventario.empty:
-        st.warning("No hay productos en el inventario.")
-    else:
-        producto_a_sustraer = st.selectbox(
-            "Seleccione el producto:",
-            st.session_state.inventario['Nombre del Producto'].values,
-            key="select_subtract"
+    if productos.empty:
+        st.warning("No hay productos disponibles")
+        return
+    
+    producto_seleccionado = st.selectbox(
+        "Seleccione un producto:",
+        productos['nombre'],
+        key="select_ajustar"
+    )
+    
+    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
+    
+    st.info(f"Stock actual: {producto['stock']}")
+    
+    tipo_ajuste = st.radio(
+        "Tipo de ajuste:",
+        ['Entrada (aumentar stock)', 'Salida (reducir stock)'],
+        key="radio_ajuste"
+    )
+    
+    cantidad = st.number_input(
+        "Cantidad",
+        min_value=1,
+        max_value=10000 if tipo_ajuste.startswith('Entrada') else producto['stock'],
+        value=1
+    )
+    
+    if st.button("Aplicar Ajuste"):
+        ajustar_stock(
+            producto['id'],
+            cantidad,
+            'entrada' if tipo_ajuste.startswith('Entrada') else 'salida'
         )
-        
-        producto_data = st.session_state.inventario[
-            st.session_state.inventario['Nombre del Producto'] == producto_a_sustraer
-        ].iloc[0]
-        
-        st.info(f"""
-        **Stock actual de '{producto_a_sustraer}':** {producto_data['Stock']}
-        """)
-        
-        cantidad = st.number_input(
-            "Cantidad a sustraer*", 
-            min_value=1, 
-            max_value=producto_data['Stock'], 
-            step=1,
-            key="input_subtract"
-        )
-        
-        if st.button("Sustraer Stock"):
-            sustraer_stock(producto_a_sustraer, cantidad)
+        st.experimental_rerun()
+
+def mostrar_historial():
+    st.header("Historial de Movimientos")
+    movimientos = obtener_movimientos()
+    
+    if movimientos.empty:
+        st.warning("No hay movimientos registrados")
+        return
+    
+    movimientos['Valor'] = movimientos['cantidad'] * movimientos['precio']
+    st.dataframe(
+        movimientos.style.format({
+            'precio': '${:,.2f}',
+            'Valor': '${:,.2f}'
+        }),
+        use_container_width=True
+    )
+
+# Menú principal
+menu = {
+    "Ver Inventario": mostrar_inventario,
+    "Agregar Producto": formulario_agregar_producto,
+    "Editar Producto": formulario_editar_producto,
+    "Eliminar Producto": formulario_eliminar_producto,
+    "Ajustar Stock": formulario_ajustar_stock,
+    "Historial": mostrar_historial
+}
+
+with st.sidebar:
+    st.header("Menú Principal")
+    opcion = st.radio(
+        "Seleccione una opción:",
+        list(menu.keys())
+    )
+
+# Mostrar la opción seleccionada
+menu[opcion]()
