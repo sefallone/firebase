@@ -61,7 +61,7 @@ def obtener_productos():
         conn.close()
 
 # ------------------------------------------
-# FUNCIONES PRINCIPALES
+# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO
 # ------------------------------------------
 
 def agregar_producto(nombre, stock, precio, costo):
@@ -93,12 +93,12 @@ def actualizar_producto(id_producto, nombre, stock, precio, costo):
         return False
 
 # ------------------------------------------
-# INTERFAZ DE USUARIO
+# INTERFAZ DE USUARIO CON ACTUALIZACIÓN AUTOMÁTICA
 # ------------------------------------------
 
 def mostrar_inventario():
-    """Muestra el inventario actual"""
-    # Verificar si necesitamos actualizar
+    """Muestra el inventario actual con auto-actualización"""
+    # Usamos un marcador de tiempo para forzar la actualización
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
     
@@ -149,7 +149,8 @@ def mostrar_formulario_agregar():
                 
             if agregar_producto(nombre, stock, precio, costo):
                 st.success("¡Producto agregado correctamente!")
-                st.rerun()  # Usamos st.rerun() en lugar de experimental_rerun
+                # Forzar actualización del estado
+                st.session_state.ultima_actualizacion = datetime.now()
 
 def mostrar_formulario_editar():
     """Formulario para editar productos existentes"""
@@ -187,7 +188,10 @@ def mostrar_formulario_editar():
                 
             if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                 st.success("¡Producto actualizado correctamente!")
-                st.rerun()  # Usamos st.rerun() en lugar de experimental_rerun
+                # Forzar actualización del estado
+                st.session_state.ultima_actualizacion = datetime.now()
+                # Opcional: Recargar la página para ver cambios inmediatos
+                st.experimental_rerun()
 
 # ------------------------------------------
 # MENÚ PRINCIPAL
