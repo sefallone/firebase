@@ -1,3 +1,6 @@
-streamlit
-numpy
 pandas
+numpy
+streamlit
+gspread
+google-auth
+gsheetsdb
