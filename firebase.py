@@ -35,10 +35,13 @@ def init_db():
 
 def get_connection():
     """Obtiene una conexión a la base de datos"""
+    # Usamos isolation_level=None para que cada execute haga un commit automático
+    # o para manejar los commits explícitamente como lo haremos en agregar/actualizar
     return sqlite3.connect(DB_FILE)
 
+# Esta función se mantiene para consultas simples o inicialización
 def ejecutar_consulta(query, params=()):
-    """Ejecuta una consulta SQL con manejo de errores"""
+    """Ejecuta una consulta SQL con manejo de errores (para operaciones que no requieren transacción compleja)"""
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -61,55 +64,59 @@ def obtener_productos():
         conn.close()
 
 # ------------------------------------------
-# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO
+# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO (REVISADAS)
 # ------------------------------------------
 
 def agregar_producto(nombre, stock, precio, costo):
-    """Agrega un nuevo producto a la base de datos"""
+    """Agrega un nuevo producto a la base de datos, con verificación de duplicados."""
+    conn = get_connection() # Obtener la conexión una sola vez
     try:
-        # Aquí puedes añadir la validación de nombre duplicado antes de ejecutar la consulta
-        conn = get_connection()
         c = conn.cursor()
+        
+        # 1. Verificar si el nombre ya existe
         c.execute("SELECT COUNT(*) FROM productos WHERE nombre=?", (nombre,))
         if c.fetchone()[0] > 0:
-            st.error(f"Ya existe un producto con el nombre '{nombre}'.")
-            return False
-        conn.close() # Cierra la conexión antes de abrir una nueva en ejecutar_consulta
-
-        if ejecutar_consulta(
-            "INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
-            (nombre, stock, precio, costo)
-        ):
-            st.session_state.ultima_actualizacion = datetime.now()
-            return True
+            st.error(f"Ya existe un producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
+            return False # No continuar si es duplicado
+            
+        # 2. Si no es duplicado, proceder con la inserción
+        c.execute("INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
+                  (nombre, stock, precio, costo))
+        conn.commit() # Confirmar la transacción
+        st.session_state.ultima_actualizacion = datetime.now()
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Error de base de datos al agregar producto: {str(e)}")
+        conn.rollback() # Revertir la transacción en caso de error
         return False
-    except Exception as e:
-        st.error(f"Error al agregar producto: {str(e)}")
-        return False
+    finally:
+        conn.close() # Asegurarse de cerrar la conexión
 
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
-    """Actualiza los datos de un producto existente"""
+    """Actualiza los datos de un producto existente, con verificación de duplicados."""
+    conn = get_connection() # Obtener la conexión una sola vez
     try:
-        # Aquí también puedes añadir validación de nombre duplicado
-        # PERO asegúrate de que no sea el mismo producto que se está editando
-        conn = get_connection()
         c = conn.cursor()
+        
+        # 1. Verificar si el nuevo nombre ya existe en OTRO producto
+        # Se excluye el ID del producto que se está editando para permitir que conserve su propio nombre.
         c.execute("SELECT COUNT(*) FROM productos WHERE nombre=? AND id != ?", (nombre, id_producto))
         if c.fetchone()[0] > 0:
             st.error(f"Ya existe otro producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
-            return False
-        conn.close()
-
-        if ejecutar_consulta(
-            "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
-            (nombre, stock, precio, costo, id_producto)
-        ):
-            st.session_state.ultima_actualizacion = datetime.now()
-            return True
+            return False # No continuar si es duplicado
+            
+        # 2. Si el nombre es único (o es el mismo nombre del producto que se edita), proceder con la actualización
+        c.execute("UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
+                  (nombre, stock, precio, costo, id_producto))
+        conn.commit() # Confirmar la transacción
+        st.session_state.ultima_actualizacion = datetime.now()
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Error de base de datos al actualizar producto: {str(e)}")
+        conn.rollback() # Revertir la transacción en caso de error
         return False
-    except Exception as e:
-        st.error(f"Error al actualizar producto: {str(e)}")
-        return False
+    finally:
+        conn.close() # Asegurarse de cerrar la conexión
 
 # ------------------------------------------
 # INTERFAZ DE USUARIO CON ACTUALIZACIÓN AUTOMÁTICA
@@ -150,8 +157,7 @@ def mostrar_formulario_agregar():
     """Formulario para agregar nuevos productos"""
     st.header("➕ Agregar Nuevo Producto")
     
-    # Esta función ahora devuelve True si la operación fue exitosa y False si no
-    action_successful = False
+    action_successful = False # Flag para indicar si la acción fue exitosa
 
     with st.form("form_agregar", clear_on_submit=True):
         nombre = st.text_input("Nombre del Producto*")
@@ -163,26 +169,23 @@ def mostrar_formulario_agregar():
         if st.form_submit_button("Agregar Producto"):
             if not nombre:
                 st.error("El nombre del producto es obligatorio")
-                return False # No exitoso
-                
-            if precio <= 0 or costo < 0:
+                # No se necesita 'return False' aquí porque el formulario ya se envió.
+                # La función principal 'mostrar_formulario_agregar' devolverá el valor de 'action_successful' al final.
+            elif precio <= 0 or costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
-                return False # No exitoso
-                
-            if agregar_producto(nombre, stock, precio, costo):
-                st.success("¡Producto agregado correctamente!")
-                st.session_state.ultima_actualizacion = datetime.now()
-                action_successful = True
             else:
-                action_successful = False # Falló agregar_producto
+                if agregar_producto(nombre, stock, precio, costo):
+                    st.success("¡Producto agregado correctamente!")
+                    action_successful = True
+                # Si agregar_producto falla (ej. duplicado), ya muestra el st.error y devuelve False.
+                # action_successful se mantiene en False en ese caso.
     return action_successful
 
 def mostrar_formulario_editar():
     """Formulario para editar productos existentes"""
     st.header("✏️ Editar Producto")
     
-    # Esta función ahora devuelve True si la operación fue exitosa y False si no
-    action_successful = False
+    action_successful = False # Flag para indicar si la acción fue exitosa
 
     productos = obtener_productos()
     
@@ -190,19 +193,21 @@ def mostrar_formulario_editar():
         st.warning("No hay productos para editar")
         return False
     
-    producto_seleccionado = st.selectbox(
+    producto_seleccionado_nombre = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
         key="select_editar"
     )
     
     # Si no hay un producto seleccionado (ej. la lista acaba de vaciarse), sal
-    if producto_seleccionado is None:
+    if producto_seleccionado_nombre is None:
         return False
         
-    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
+    # Obtener el producto completo basado en el nombre seleccionado
+    producto = productos[productos['nombre'] == producto_seleccionado_nombre].iloc[0]
     
     with st.form("form_editar"):
+        # Asegúrate de que los valores iniciales se toman del producto seleccionado
         nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'], key="nombre_edit")
         col1, col2 = st.columns(2)
         nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'], key="stock_edit")
@@ -212,18 +217,15 @@ def mostrar_formulario_editar():
         if st.form_submit_button("Actualizar Producto"):
             if not nuevo_nombre:
                 st.error("El nombre del producto es obligatorio")
-                return False # No exitoso
-                
-            if nuevo_precio <= 0 or nuevo_costo < 0:
+            elif nuevo_precio <= 0 or nuevo_costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
-                return False # No exitoso
-                
-            if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
-                st.success("¡Producto actualizado correctamente!")
-                st.session_state.ultima_actualizacion = datetime.now()
-                action_successful = True
             else:
-                action_successful = False # Falló actualizar_producto
+                # Pasa el ID del producto para la actualización
+                if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
+                    st.success("¡Producto actualizado correctamente!")
+                    action_successful = True
+                # Si actualizar_producto falla (ej. duplicado), ya muestra el st.error y devuelve False.
+                # action_successful se mantiene en False en ese caso.
     return action_successful
 
 # ------------------------------------------
@@ -234,11 +236,10 @@ def main():
     # Inicializar la base de datos
     init_db()
     
-    # Inicializar variable de estado si no existe
+    # Inicializar variables de estado si no existen
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
     
-    # Inicializar la bandera de rerun
     if 'do_rerun' not in st.session_state:
         st.session_state.do_rerun = False
 
@@ -258,7 +259,6 @@ def main():
         )
     
     # Ejecutar la función de la opción seleccionada
-    # IMPORTANTE: Captura el resultado si la función indica que se realizó una acción de modificación
     action_performed = False
     if selected == "Agregar Producto":
         action_performed = mostrar_formulario_agregar()
