@@ -35,8 +35,6 @@ def init_db():
 
 def get_connection():
     """Obtiene una conexión a la base de datos"""
-    # Usamos isolation_level=None para que cada execute haga un commit automático
-    # o para manejar los commits explícitamente como lo haremos en agregar/actualizar
     return sqlite3.connect(DB_FILE)
 
 # Esta función se mantiene para consultas simples o inicialización
@@ -64,7 +62,7 @@ def obtener_productos():
         conn.close()
 
 # ------------------------------------------
-# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO (REVISADAS)
+# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN DE ESTADO
 # ------------------------------------------
 
 def agregar_producto(nombre, stock, precio, costo):
@@ -157,8 +155,6 @@ def mostrar_formulario_agregar():
     """Formulario para agregar nuevos productos"""
     st.header("➕ Agregar Nuevo Producto")
     
-    action_successful = False # Flag para indicar si la acción fue exitosa
-
     with st.form("form_agregar", clear_on_submit=True):
         nombre = st.text_input("Nombre del Producto*")
         col1, col2 = st.columns(2)
@@ -169,39 +165,39 @@ def mostrar_formulario_agregar():
         if st.form_submit_button("Agregar Producto"):
             if not nombre:
                 st.error("El nombre del producto es obligatorio")
-                # No se necesita 'return False' aquí porque el formulario ya se envió.
-                # La función principal 'mostrar_formulario_agregar' devolverá el valor de 'action_successful' al final.
             elif precio <= 0 or costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
             else:
                 if agregar_producto(nombre, stock, precio, costo):
                     st.success("¡Producto agregado correctamente!")
-                    action_successful = True
-                # Si agregar_producto falla (ej. duplicado), ya muestra el st.error y devuelve False.
-                # action_successful se mantiene en False en ese caso.
-    return action_successful
+                    # Redirigir a "Ver Inventario" y forzar un rerun para ver los cambios
+                    st.session_state.main_menu = "Ver Inventario"
+                    st.experimental_rerun()
+                # Si agregar_producto falla (ej. duplicado), ya muestra el st.error.
+                # No se necesita un rerun en caso de fallo, el usuario permanece en el formulario.
 
 def mostrar_formulario_editar():
     """Formulario para editar productos existentes"""
     st.header("✏️ Editar Producto")
     
-    action_successful = False # Flag para indicar si la acción fue exitosa
-
     productos = obtener_productos()
     
     if productos.empty:
         st.warning("No hay productos para editar")
-        return False
-    
+        return # No hay productos, no hay nada que seleccionar
+
+    # Asegúrate de que el selectbox se inicializa con un valor si hay productos
     producto_seleccionado_nombre = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
-        key="select_editar"
+        key="select_editar",
+        # Si la lista no está vacía, selecciona el primer elemento por defecto
+        index=0 if not productos.empty else None
     )
     
-    # Si no hay un producto seleccionado (ej. la lista acaba de vaciarse), sal
+    # Si por alguna razón no se seleccionó nada (ej. lista se vació justo ahora), sal
     if producto_seleccionado_nombre is None:
-        return False
+        return
         
     # Obtener el producto completo basado en el nombre seleccionado
     producto = productos[productos['nombre'] == producto_seleccionado_nombre].iloc[0]
@@ -223,10 +219,11 @@ def mostrar_formulario_editar():
                 # Pasa el ID del producto para la actualización
                 if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                     st.success("¡Producto actualizado correctamente!")
-                    action_successful = True
-                # Si actualizar_producto falla (ej. duplicado), ya muestra el st.error y devuelve False.
-                # action_successful se mantiene en False en ese caso.
-    return action_successful
+                    # Redirigir a "Ver Inventario" y forzar un rerun para ver los cambios
+                    st.session_state.main_menu = "Ver Inventario"
+                    st.experimental_rerun()
+                # Si actualizar_producto falla (ej. duplicado), ya muestra el st.error.
+                # No se necesita un rerun en caso de fallo, el usuario permanece en el formulario.
 
 # ------------------------------------------
 # MENÚ PRINCIPAL
@@ -240,10 +237,10 @@ def main():
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
     
-    if 'do_rerun' not in st.session_state:
-        st.session_state.do_rerun = False
+    # Inicializar la selección del menú si no existe, o si es la primera vez que se carga
+    if 'main_menu' not in st.session_state:
+        st.session_state.main_menu = "Ver Inventario"
 
-    # Menú de opciones
     menu_options = {
         "Ver Inventario": mostrar_inventario,
         "Agregar Producto": mostrar_formulario_agregar,
@@ -252,31 +249,18 @@ def main():
     
     with st.sidebar:
         st.title("Menú Principal")
-        selected = st.radio(
+        # El st.radio ahora se enlaza directamente a st.session_state.main_menu
+        st.session_state.main_menu = st.radio(
             "Seleccione una opción:",
             list(menu_options.keys()),
-            key="main_menu"
+            key="main_menu", # Usamos la misma clave para que el widget y el estado estén sincronizados
+            index=list(menu_options.keys()).index(st.session_state.main_menu)
         )
     
     # Ejecutar la función de la opción seleccionada
-    action_performed = False
-    if selected == "Agregar Producto":
-        action_performed = mostrar_formulario_agregar()
-    elif selected == "Editar Producto":
-        action_performed = mostrar_formulario_editar()
-    else:
-        # Para "Ver Inventario", simplemente llama a la función
-        menu_options[selected]()
-    
-    # Si alguna de las funciones de acción indicó que se realizó una operación exitosa,
-    # establece la bandera para el rerun.
-    if action_performed:
-        st.session_state.do_rerun = True
-
-    # Realiza el rerun **solo si la bandera está activada**
-    if st.session_state.do_rerun:
-        st.session_state.do_rerun = False # Resetear la bandera para evitar bucles infinitos
-        st.experimental_rerun()
+    # Ya no necesitamos el `action_performed` flag aquí,
+    # el rerun se maneja dentro de las funciones de formulario.
+    menu_options[st.session_state.main_menu]()
 
 
 if __name__ == "__main__":
