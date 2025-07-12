@@ -1,65 +1,54 @@
 import streamlit as st
 import pandas as pd
-from google.oauth2 import service_account
-from gsheetsdb import connect
 import gspread
+from google.oauth2 import service_account
 
 # Configuración de la página
 st.set_page_config(page_title="Sistema de Inventario", layout="wide")
-
-# Título de la aplicación
 st.title("📦 Sistema de Gestión de Inventario en la Nube")
 
 # Conexión con Google Sheets
 @st.cache_resource()
 def get_gsheet_connection():
-    # Crear una connection object
     credentials = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
-    conn = connect(credentials=credentials)
-    client = gspread.authorize(credentials)
-    return client
+    return gspread.authorize(credentials)
 
-def get_worksheet(client):
+def get_worksheet():
+    client = get_gsheet_connection()
     sheet = client.open_by_key(st.secrets["private_gsheets_url"]).worksheet("Inventario")
     return sheet
 
-def load_inventario(sheet):
+def load_inventario():
+    sheet = get_worksheet()
     records = sheet.get_all_records()
     return pd.DataFrame(records)
 
-def save_inventario(sheet, df):
-    # Limpiar la hoja
-    sheet.clear()
-    # Agregar los encabezados
-    sheet.append_row(df.columns.tolist())
-    # Agregar los datos
-    for _, row in df.iterrows():
-        sheet.append_row(row.fillna('').tolist())
-
-# Inicializar la conexión y cargar datos
-try:
-    client = get_gsheet_connection()
-    sheet = get_worksheet(client)
+def save_inventario(df):
+    sheet = get_worksheet()
     
-    if 'inventario' not in st.session_state:
-        st.session_state.inventario = load_inventario(sheet)
-        
-        # Si está vacío, crear estructura inicial
+    # Preparar datos
+    data = [df.columns.tolist()] + df.fillna('').values.tolist()
+    
+    # Actualizar toda la hoja de una vez
+    sheet.update('A1', data)
+
+# Inicializar inventario
+if 'inventario' not in st.session_state:
+    try:
+        st.session_state.inventario = load_inventario()
         if st.session_state.inventario.empty:
             st.session_state.inventario = pd.DataFrame(columns=[
                 'Nombre del Producto', 'Stock', 'Precio', 'Costo'
             ])
-            save_inventario(sheet, st.session_state.inventario)
-except Exception as e:
-    st.error(f"Error al conectar con Google Sheets: {e}")
-    st.session_state.inventario = pd.DataFrame(columns=[
-        'Nombre del Producto', 'Stock', 'Precio', 'Costo'
-    ])
-    st.stop()
-
+            save_inventario(st.session_state.inventario)
+    except Exception as e:
+        st.error(f"Error al cargar inventario: {e}")
+        st.session_state.inventario = pd.DataFrame(columns=[
+            'Nombre del Producto', 'Stock', 'Precio', 'Costo'
+        ])
 # Función para agregar un nuevo producto
 def agregar_producto(nombre, stock, precio, costo):
     try:
