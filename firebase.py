@@ -168,6 +168,10 @@ def mostrar_formulario_editar():
         key="select_editar"
     )
     
+    # Asegúrate de que producto_seleccionado no sea None si la lista está vacía
+    if producto_seleccionado is None:
+        return
+
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
     
     with st.form("form_editar"):
@@ -188,11 +192,10 @@ def mostrar_formulario_editar():
                 
             if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                 st.success("¡Producto actualizado correctamente!")
-                # Forzar actualización del estado
+                # Forzar actualización del estado (esto ayuda, pero lo principal es el rerun)
                 st.session_state.ultima_actualizacion = datetime.now()
-                # Opcional: Recargar la página para ver cambios inmediatos
+                # AÑADE ESTA LÍNEA PARA FORZAR LA RE-EJECUCIÓN
                 st.experimental_rerun()
-
 # ------------------------------------------
 # MENÚ PRINCIPAL
 # ------------------------------------------
