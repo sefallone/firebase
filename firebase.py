@@ -11,15 +11,14 @@ st.title("📦 Sistema de Gestión de Inventario")
 DB_FILE = "inventario.db"
 
 # ------------------------------------------
-# FUNCIONES DE BASE DE DATOS
+# FUNCIONES DE BASE DE DATOS MEJORADAS
 # ------------------------------------------
 
 def init_db():
-    """Inicializa la base de datos con las tablas necesarias"""
+    """Inicializa la base de datos con manejo de errores"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Tabla de productos
     c.execute('''
         CREATE TABLE IF NOT EXISTS productos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,54 +52,51 @@ def ejecutar_consulta(query, params=()):
         conn.close()
 
 def obtener_productos():
-    """Obtiene todos los productos como DataFrame"""
+    """Obtiene todos los productos y actualiza el estado"""
     conn = get_connection()
     try:
         df = pd.read_sql("SELECT * FROM productos ORDER BY nombre", conn)
+        # Actualizar el estado de la aplicación
+        st.session_state.productos_df = df
         return df
     finally:
         conn.close()
 
 # ------------------------------------------
-# FUNCIONES PRINCIPALES (AGREGAR Y EDITAR)
+# FUNCIONES PRINCIPALES CON ACTUALIZACIÓN
 # ------------------------------------------
 
 def agregar_producto(nombre, stock, precio, costo):
-    """Agrega un nuevo producto a la base de datos"""
-    try:
-        if not ejecutar_consulta(
-            "INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
-            (nombre, stock, precio, costo)
-        ):
-            return False
-        
+    """Agrega un nuevo producto y actualiza el estado"""
+    if ejecutar_consulta(
+        "INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
+        (nombre, stock, precio, costo)
+    ):
         st.session_state.ultima_actualizacion = datetime.now()
         return True
-    except Exception as e:
-        st.error(f"Error al agregar producto: {str(e)}")
-        return False
+    return False
 
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
-    """Actualiza los datos de un producto existente"""
-    try:
-        if not ejecutar_consulta(
-            "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
-            (nombre, stock, precio, costo, id_producto)
-        ):
-            return False
-        
+    """Actualiza un producto y fuerza la actualización"""
+    if ejecutar_consulta(
+        "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
+        (nombre, stock, precio, costo, id_producto)
+    ):
         st.session_state.ultima_actualizacion = datetime.now()
         return True
-    except Exception as e:
-        st.error(f"Error al actualizar producto: {str(e)}")
-        return False
+    return False
 
 # ------------------------------------------
-# INTERFAZ DE USUARIO
+# INTERFAZ DE USUARIO CON ACTUALIZACIÓN
 # ------------------------------------------
 
 def mostrar_inventario():
-    """Muestra el inventario actual"""
+    """Muestra el inventario con actualización automática"""
+    # Verificar si necesitamos actualizar
+    if 'ultima_actualizacion' not in st.session_state:
+        st.session_state.ultima_actualizacion = datetime.now()
+    
+    # Obtener productos (actualiza el estado automáticamente)
     productos = obtener_productos()
     
     if productos.empty:
@@ -127,7 +123,7 @@ def mostrar_inventario():
     )
 
 def mostrar_formulario_agregar():
-    """Formulario para agregar nuevos productos"""
+    """Formulario para agregar productos"""
     st.header("➕ Agregar Nuevo Producto")
     
     with st.form("form_agregar", clear_on_submit=True):
@@ -148,11 +144,10 @@ def mostrar_formulario_agregar():
                 
             if agregar_producto(nombre, stock, precio, costo):
                 st.success("¡Producto agregado correctamente!")
-            else:
-                st.error("Error al agregar el producto")
+                st.experimental_rerun()
 
 def mostrar_formulario_editar():
-    """Formulario para editar productos existentes"""
+    """Formulario para editar productos con actualización"""
     st.header("✏️ Editar Producto")
     
     productos = obtener_productos()
@@ -163,17 +158,18 @@ def mostrar_formulario_editar():
     
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
-        productos['nombre']
+        productos['nombre'],
+        key="select_editar"
     )
     
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
     
     with st.form("form_editar"):
-        nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'])
+        nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'], key="nombre_edit")
         col1, col2 = st.columns(2)
-        nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'])
-        nuevo_precio = col1.number_input("Precio*", min_value=0.0, value=producto['precio'], step=0.01, format="%.2f")
-        nuevo_costo = col2.number_input("Costo*", min_value=0.0, value=producto['costo'], step=0.01, format="%.2f")
+        nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'], key="stock_edit")
+        nuevo_precio = col1.number_input("Precio*", min_value=0.0, value=producto['precio'], step=0.01, format="%.2f", key="precio_edit")
+        nuevo_costo = col2.number_input("Costo*", min_value=0.0, value=producto['costo'], step=0.01, format="%.2f", key="costo_edit")
         
         if st.form_submit_button("Actualizar Producto"):
             if not nuevo_nombre:
@@ -186,18 +182,17 @@ def mostrar_formulario_editar():
                 
             if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                 st.success("¡Producto actualizado correctamente!")
-            else:
-                st.error("Error al actualizar el producto")
+                st.experimental_rerun()
 
 # ------------------------------------------
-# MENÚ PRINCIPAL
+# CONFIGURACIÓN PRINCIPAL
 # ------------------------------------------
 
 def main():
     # Inicializar la base de datos
     init_db()
     
-    # Inicializar variable de estado si no existe
+    # Inicializar estado si no existe
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
     
@@ -212,7 +207,8 @@ def main():
         st.title("Menú Principal")
         selected = st.radio(
             "Seleccione una opción:",
-            list(menu_options.keys())
+            list(menu_options.keys()),
+            key="main_menu"
         )
     
     # Mostrar la opción seleccionada
