@@ -155,66 +155,69 @@ def mostrar_formulario_agregar():
 def mostrar_formulario_editar():
     """Formulario para editar productos existentes"""
     st.header("✏️ Editar Producto")
-    
+
     productos = obtener_productos()
-    
+
     if productos.empty:
         st.warning("No hay productos para editar")
-        return
-    
+        return False # Indicar que no se realizó ninguna acción de edición
+
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
         key="select_editar"
     )
-    
-    # Asegúrate de que producto_seleccionado no sea None si la lista está vacía
+
+    # Manejar el caso donde no hay nada seleccionado (lista vacía)
     if producto_seleccionado is None:
-        return
+        return False
 
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
-    
+
     with st.form("form_editar"):
         nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'], key="nombre_edit")
         col1, col2 = st.columns(2)
         nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'], key="stock_edit")
         nuevo_precio = col1.number_input("Precio*", min_value=0.0, value=producto['precio'], step=0.01, format="%.2f", key="precio_edit")
         nuevo_costo = col2.number_input("Costo*", min_value=0.0, value=producto['costo'], step=0.01, format="%.2f", key="costo_edit")
-        
-        if st.form_submit_button("Actualizar Producto"):
+
+        submitted = st.form_submit_button("Actualizar Producto")
+
+        if submitted:
             if not nuevo_nombre:
                 st.error("El nombre del producto es obligatorio")
-                return
-                
+                return False
+
             if nuevo_precio <= 0 or nuevo_costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
-                return
-                
+                return False
+
             if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                 st.success("¡Producto actualizado correctamente!")
-                # Forzar actualización del estado (esto ayuda, pero lo principal es el rerun)
-                st.session_state.ultima_actualizacion = datetime.now()
-                # AÑADE ESTA LÍNEA PARA FORZAR LA RE-EJECUCIÓN
-                st.experimental_rerun()
+                st.session_state.ultima_actualizacion = datetime.now() # Esto sigue siendo útil para reactividad más fina
+                return True # Indicar éxito
+            else:
+                return False # Indicar fallo
+    return False # Si el formulario no se envió o no hubo éxito en la edición
+
+
 # ------------------------------------------
 # MENÚ PRINCIPAL
 # ------------------------------------------
 
 def main():
-    # Inicializar la base de datos
     init_db()
-    
-    # Inicializar variable de estado si no existe
+
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
-    
-    # Menú de opciones
+
     menu_options = {
         "Ver Inventario": mostrar_inventario,
         "Agregar Producto": mostrar_formulario_agregar,
         "Editar Producto": mostrar_formulario_editar
+        # Agrega aquí tu función de eliminar si la implementas
     }
-    
+
     with st.sidebar:
         st.title("Menú Principal")
         selected = st.radio(
@@ -222,9 +225,20 @@ def main():
             list(menu_options.keys()),
             key="main_menu"
         )
-    
-    # Mostrar la opción seleccionada
-    menu_options[selected]()
+
+    # Muestra la opción seleccionada y maneja el rerun si la acción fue de modificación
+    if selected == "Agregar Producto":
+        if mostrar_formulario_agregar(): # Asumiendo que esta función también devuelve True/False
+            st.experimental_rerun()
+    elif selected == "Editar Producto":
+        if mostrar_formulario_editar():
+            st.experimental_rerun()
+    # elif selected == "Eliminar Producto": # Si implementas esta opción
+    #     if mostrar_formulario_eliminar():
+    #         st.experimental_rerun()
+    else:
+        # Para las opciones que no requieren rerun inmediato (como Ver Inventario)
+        menu_options[selected]()
 
 if __name__ == "__main__":
     main()
