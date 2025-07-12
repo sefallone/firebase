@@ -246,15 +246,6 @@ def formulario_editar_producto():
             else:
                 st.error("Complete todos los campos obligatorios")
 
-# 3. Actualiza tu menú principal
-menu = {
-    "Ver Inventario": mostrar_inventario,
-    "Agregar Producto": formulario_agregar_producto,
-    "Editar Producto": formulario_editar_producto,  # O usar formulario_editar_producto_alternativo
-    "Eliminar Producto": formulario_eliminar_producto,
-    "Ajustar Stock": formulario_ajustar_stock,
-    "Historial": mostrar_historial
-}
 def formulario_eliminar_producto():
     st.header("Eliminar Producto")
     productos = obtener_productos()
@@ -282,6 +273,7 @@ def formulario_eliminar_producto():
     if st.button("Confirmar Eliminación"):
         eliminar_producto(producto['id'])
         st.experimental_rerun()
+
 
 def formulario_ajustar_stock():
     st.header("Ajustar Stock")
