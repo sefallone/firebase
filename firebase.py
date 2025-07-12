@@ -67,6 +67,15 @@ def obtener_productos():
 def agregar_producto(nombre, stock, precio, costo):
     """Agrega un nuevo producto a la base de datos"""
     try:
+        # Aquí puedes añadir la validación de nombre duplicado antes de ejecutar la consulta
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM productos WHERE nombre=?", (nombre,))
+        if c.fetchone()[0] > 0:
+            st.error(f"Ya existe un producto con el nombre '{nombre}'.")
+            return False
+        conn.close() # Cierra la conexión antes de abrir una nueva en ejecutar_consulta
+
         if ejecutar_consulta(
             "INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
             (nombre, stock, precio, costo)
@@ -81,6 +90,16 @@ def agregar_producto(nombre, stock, precio, costo):
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
     """Actualiza los datos de un producto existente"""
     try:
+        # Aquí también puedes añadir validación de nombre duplicado
+        # PERO asegúrate de que no sea el mismo producto que se está editando
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM productos WHERE nombre=? AND id != ?", (nombre, id_producto))
+        if c.fetchone()[0] > 0:
+            st.error(f"Ya existe otro producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
+            return False
+        conn.close()
+
         if ejecutar_consulta(
             "UPDATE productos SET nombre=?, stock=?, precio=?, costo=? WHERE id=?",
             (nombre, stock, precio, costo, id_producto)
@@ -131,6 +150,9 @@ def mostrar_formulario_agregar():
     """Formulario para agregar nuevos productos"""
     st.header("➕ Agregar Nuevo Producto")
     
+    # Esta función ahora devuelve True si la operación fue exitosa y False si no
+    action_successful = False
+
     with st.form("form_agregar", clear_on_submit=True):
         nombre = st.text_input("Nombre del Producto*")
         col1, col2 = st.columns(2)
@@ -141,83 +163,92 @@ def mostrar_formulario_agregar():
         if st.form_submit_button("Agregar Producto"):
             if not nombre:
                 st.error("El nombre del producto es obligatorio")
-                return
+                return False # No exitoso
                 
             if precio <= 0 or costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
-                return
+                return False # No exitoso
                 
             if agregar_producto(nombre, stock, precio, costo):
                 st.success("¡Producto agregado correctamente!")
-                # Forzar actualización del estado
                 st.session_state.ultima_actualizacion = datetime.now()
+                action_successful = True
+            else:
+                action_successful = False # Falló agregar_producto
+    return action_successful
 
 def mostrar_formulario_editar():
     """Formulario para editar productos existentes"""
     st.header("✏️ Editar Producto")
+    
+    # Esta función ahora devuelve True si la operación fue exitosa y False si no
+    action_successful = False
 
     productos = obtener_productos()
-
+    
     if productos.empty:
         st.warning("No hay productos para editar")
-        return False # Indicar que no se realizó ninguna acción de edición
-
+        return False
+    
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
         productos['nombre'],
         key="select_editar"
     )
-
-    # Manejar el caso donde no hay nada seleccionado (lista vacía)
+    
+    # Si no hay un producto seleccionado (ej. la lista acaba de vaciarse), sal
     if producto_seleccionado is None:
         return False
-
+        
     producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
-
+    
     with st.form("form_editar"):
         nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'], key="nombre_edit")
         col1, col2 = st.columns(2)
         nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'], key="stock_edit")
         nuevo_precio = col1.number_input("Precio*", min_value=0.0, value=producto['precio'], step=0.01, format="%.2f", key="precio_edit")
         nuevo_costo = col2.number_input("Costo*", min_value=0.0, value=producto['costo'], step=0.01, format="%.2f", key="costo_edit")
-
-        submitted = st.form_submit_button("Actualizar Producto")
-
-        if submitted:
+        
+        if st.form_submit_button("Actualizar Producto"):
             if not nuevo_nombre:
                 st.error("El nombre del producto es obligatorio")
-                return False
-
+                return False # No exitoso
+                
             if nuevo_precio <= 0 or nuevo_costo < 0:
                 st.error("Precio y costo deben ser valores positivos")
-                return False
-
+                return False # No exitoso
+                
             if actualizar_producto(producto['id'], nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo):
                 st.success("¡Producto actualizado correctamente!")
-                st.session_state.ultima_actualizacion = datetime.now() # Esto sigue siendo útil para reactividad más fina
-                return True # Indicar éxito
+                st.session_state.ultima_actualizacion = datetime.now()
+                action_successful = True
             else:
-                return False # Indicar fallo
-    return False # Si el formulario no se envió o no hubo éxito en la edición
-
+                action_successful = False # Falló actualizar_producto
+    return action_successful
 
 # ------------------------------------------
 # MENÚ PRINCIPAL
 # ------------------------------------------
 
 def main():
+    # Inicializar la base de datos
     init_db()
-
+    
+    # Inicializar variable de estado si no existe
     if 'ultima_actualizacion' not in st.session_state:
         st.session_state.ultima_actualizacion = datetime.now()
+    
+    # Inicializar la bandera de rerun
+    if 'do_rerun' not in st.session_state:
+        st.session_state.do_rerun = False
 
+    # Menú de opciones
     menu_options = {
         "Ver Inventario": mostrar_inventario,
         "Agregar Producto": mostrar_formulario_agregar,
         "Editar Producto": mostrar_formulario_editar
-        # Agrega aquí tu función de eliminar si la implementas
     }
-
+    
     with st.sidebar:
         st.title("Menú Principal")
         selected = st.radio(
@@ -225,20 +256,28 @@ def main():
             list(menu_options.keys()),
             key="main_menu"
         )
-
-    # Muestra la opción seleccionada y maneja el rerun si la acción fue de modificación
+    
+    # Ejecutar la función de la opción seleccionada
+    # IMPORTANTE: Captura el resultado si la función indica que se realizó una acción de modificación
+    action_performed = False
     if selected == "Agregar Producto":
-        if mostrar_formulario_agregar(): # Asumiendo que esta función también devuelve True/False
-            st.experimental_rerun()
+        action_performed = mostrar_formulario_agregar()
     elif selected == "Editar Producto":
-        if mostrar_formulario_editar():
-            st.experimental_rerun()
-    # elif selected == "Eliminar Producto": # Si implementas esta opción
-    #     if mostrar_formulario_eliminar():
-    #         st.experimental_rerun()
+        action_performed = mostrar_formulario_editar()
     else:
-        # Para las opciones que no requieren rerun inmediato (como Ver Inventario)
+        # Para "Ver Inventario", simplemente llama a la función
         menu_options[selected]()
+    
+    # Si alguna de las funciones de acción indicó que se realizó una operación exitosa,
+    # establece la bandera para el rerun.
+    if action_performed:
+        st.session_state.do_rerun = True
+
+    # Realiza el rerun **solo si la bandera está activada**
+    if st.session_state.do_rerun:
+        st.session_state.do_rerun = False # Resetear la bandera para evitar bucles infinitos
+        st.experimental_rerun()
+
 
 if __name__ == "__main__":
     main()
