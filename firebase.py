@@ -207,21 +207,25 @@ def formulario_agregar_producto():
 
 def formulario_editar_producto():
     st.header("Editar Producto")
-    productos = obtener_productos()
     
-    if productos.empty:
+    if 'productos' not in st.session_state:
+        st.session_state.productos = obtener_productos()
+    
+    if st.session_state.productos.empty:
         st.warning("No hay productos para editar")
         return
     
     producto_seleccionado = st.selectbox(
         "Seleccione un producto:",
-        productos['nombre'],
-        key="select_editar"
+        st.session_state.productos['nombre'],
+        key="select_editar_alt"
     )
     
-    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
+    producto = st.session_state.productos[
+        st.session_state.productos['nombre'] == producto_seleccionado
+    ].iloc[0]
     
-    with st.form("form_editar"):
+    with st.form("form_editar_alt"):
         nuevo_nombre = st.text_input("Nombre", value=producto['nombre'])
         col1, col2 = st.columns(2)
         nuevo_stock = col1.number_input("Stock", min_value=0, value=producto['stock'])
@@ -237,10 +241,20 @@ def formulario_editar_producto():
                     nuevo_precio,
                     nuevo_costo
                 )
-                st.experimental_rerun()
+                st.success("¡Producto actualizado!")
+                st.session_state.productos = obtener_productos()  # Actualiza los datos
             else:
                 st.error("Complete todos los campos obligatorios")
 
+# 3. Actualiza tu menú principal
+menu = {
+    "Ver Inventario": mostrar_inventario,
+    "Agregar Producto": formulario_agregar_producto,
+    "Editar Producto": formulario_editar_producto,  # O usar formulario_editar_producto_alternativo
+    "Eliminar Producto": formulario_eliminar_producto,
+    "Ajustar Stock": formulario_ajustar_stock,
+    "Historial": mostrar_historial
+}
 def formulario_eliminar_producto():
     st.header("Eliminar Producto")
     productos = obtener_productos()
