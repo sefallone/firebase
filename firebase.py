@@ -209,6 +209,112 @@ def mostrar_inventario():
         height=600
     )
 
+def mostrar_formulario_editar():
+    """Formulario para editar productos con validación completa"""
+    st.header("✏️ Editar Producto")
+    
+    # Obtener productos con manejo de errores
+    try:
+        productos = obtener_productos()
+        if productos.empty:
+            st.warning("No hay productos disponibles para editar")
+            return
+    except Exception as e:
+        st.error(f"Error al cargar productos: {str(e)}")
+        return
+    
+    # Seleccionar producto
+    producto_seleccionado = st.selectbox(
+        "Seleccione un producto a editar:",
+        productos['nombre'],
+        key="select_editar_producto"
+    )
+    
+    if not producto_seleccionado:
+        st.warning("Por favor seleccione un producto")
+        return
+    
+    # Obtener datos del producto seleccionado
+    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
+    
+    # Formulario de edición
+    with st.form(key="form_editar_producto", clear_on_submit=False):
+        nuevo_nombre = st.text_input(
+            "Nombre del producto*",
+            value=producto['nombre'],
+            key="editar_nombre"
+        )
+        
+        col1, col2 = st.columns(2)
+        nuevo_stock = col1.number_input(
+            "Cantidad en stock*",
+            min_value=0,
+            value=producto['stock'],
+            step=1,
+            key="editar_stock"
+        )
+        nuevo_precio = col1.number_input(
+            "Precio de venta*",
+            min_value=0.01,
+            value=float(producto['precio']),
+            step=0.01,
+            format="%.2f",
+            key="editar_precio"
+        )
+        nuevo_costo = col2.number_input(
+            "Costo unitario*",
+            min_value=0.0,
+            value=float(producto['costo']),
+            step=0.01,
+            format="%.2f",
+            key="editar_costo"
+        )
+        
+        # Validación antes de enviar
+        submitted = st.form_submit_button("Guardar Cambios")
+        if submitted:
+            if not nuevo_nombre.strip():
+                st.error("El nombre del producto es obligatorio")
+                st.stop()
+                
+            if nuevo_precio <= 0:
+                st.error("El precio debe ser mayor que 0")
+                st.stop()
+                
+            if nuevo_costo < 0:
+                st.error("El costo no puede ser negativo")
+                st.stop()
+                
+            if nuevo_precio <= nuevo_costo:
+                st.error("El precio debe ser mayor que el costo")
+                st.stop()
+            
+            # Confirmación adicional
+            confirmar = st.checkbox("Confirmo que deseo actualizar este producto", False)
+            if not confirmar:
+                st.warning("Por favor confirme los cambios")
+                st.stop()
+            
+            # Ejecutar actualización
+            if actualizar_producto(
+                producto['id'],
+                nuevo_nombre.strip(),
+                nuevo_stock,
+                nuevo_precio,
+                nuevo_costo
+            ):
+                st.success("Producto actualizado exitosamente!")
+                st.session_state.ultima_actualizacion = datetime.now()
+                
+                # Opción para volver al inventario
+                if st.button("Volver al Inventario"):
+                    st.session_state.main_menu = "Ver Inventario"
+                    st.rerun()
+            else:
+                st.error("Error al actualizar el producto")
+
+
+
 def mostrar_formulario_agregar():
     """Formulario para agregar productos corregido"""
     st.header("➕ Agregar Nuevo Producto")
