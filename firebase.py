@@ -433,3 +433,5 @@ def main():
         st.error(f"Error al cargar la sección: {str(e)}")
         st.session_state.main_menu = "Ver Inventario"
         st.rerun()
+if __name__ == "__main__":
+    main()
