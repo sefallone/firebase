@@ -136,7 +136,7 @@ def actualizar_producto(id_producto, nombre, stock, precio, costo):
                 """UPDATE productos 
                 SET nombre=?, stock=?, precio=?, costo=?, fecha_actualizacion=CURRENT_TIMESTAMP 
                 WHERE id=?""",
-                (nombre, stock, precio, costo, id_producto)
+                (nombre, stock, precio, costo, id_producto))
                 
             # Registrar cambios en historial
             cambios = []
