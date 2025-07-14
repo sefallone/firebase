@@ -54,7 +54,7 @@ def registrar_historial(producto_id, operacion, detalles=None):
         )
 
 def obtener_productos(filtro=None):
-    """Obtiene productos opcionalmente filtrados por nombre"""
+    """Obtiene todos los productos, opcionalmente filtrados por nombre"""
     try:
         with sqlite3.connect(DB_FILE) as conn:
             query = "SELECT * FROM productos"
@@ -62,16 +62,12 @@ def obtener_productos(filtro=None):
             
             if filtro and filtro.strip():
                 query += " WHERE nombre LIKE ?"
-                params = (f'%{filtro.strip()}%',)
+                params = (f'%{filtro}%',)
             
             query += " ORDER BY nombre"
             return pd.read_sql(query, conn, params=params)
-            
     except sqlite3.Error as e:
-        st.error(f"Error al obtener productos: {str(e)}")
-        return pd.DataFrame()  # Retorna DataFrame vacío en caso de error
-    except Exception as e:
-        st.error(f"Error inesperado: {str(e)}")
+        st.error(f"Error al cargar productos: {str(e)}")
         return pd.DataFrame()
 
 def agregar_producto(nombre, stock, precio, costo):
@@ -185,15 +181,15 @@ def mostrar_inventario():
     """Muestra el inventario con opción de filtrado"""
     st.header("📋 Inventario Actual")
     
-    # Filtrado por nombre
-    filtro = st.text_input("🔍 Filtrar por nombre:", key="filtro_inventario")
+    # Widget de búsqueda
+    filtro = st.text_input("🔍 Buscar producto por nombre:")
     
-    try:
-        productos = obtener_productos(filtro)
-        
-        if productos.empty:
-            st.warning("No hay productos registrados")
-            return
+    # Obtener productos (con filtro si aplica)
+    productos = obtener_productos(filtro)
+    
+    if productos.empty:
+        st.warning("No hay productos registrados")
+        return
             
         # Cálculo de métricas
         productos['Valor Total'] = productos['stock'] * productos['precio']
