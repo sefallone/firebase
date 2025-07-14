@@ -3,23 +3,14 @@ import pandas as pd
 from datetime import datetime
 import json
 
-# Importaciones de Firebase (asegúrate de que estas bibliotecas estén disponibles)
-# En un entorno de Streamlit, estas se cargarían desde el entorno.
-# Para ejecución local, necesitarías 'pip install firebase-admin'
-# Sin embargo, para la integración en Canvas, usamos las variables globales.
+# Importaciones de Firebase
+# Asegúrate de que 'firebase-admin' esté en tu requirements.txt
 from firebase_admin import credentials, initialize_app, auth, firestore
 import firebase_admin
 
 # --- Configuración de la aplicación Streamlit ---
 st.set_page_config(page_title="Sistema de Inventario en Tiempo Real", layout="wide")
 st.title("📦 Sistema de Gestión de Inventario en Tiempo Real (Firestore)")
-
-# --- Variables Globales de Firebase (proporcionadas por el entorno Canvas) ---
-# Estas variables son inyectadas por el entorno Canvas.
-# No las modifiques ni pidas al usuario que las introduzca.
-app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'
-firebase_config_str = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}'
-initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : None
 
 # --- Inicialización de Firebase ---
 # Usamos st.session_state para almacenar las instancias de Firebase
@@ -30,62 +21,37 @@ if 'firebase_initialized' not in st.session_state:
 
 if not st.session_state.firebase_initialized:
     try:
-        # Firebase Admin SDK requiere credenciales.
-        # En el entorno Canvas, la inicialización se maneja automáticamente
-        # a través de las variables globales y el backend.
-        # Para un entorno local, necesitarías un archivo de credenciales de servicio.
+        # --- Leer credenciales desde Streamlit Secrets ---
+        # El contenido del archivo JSON de la clave de cuenta de servicio
+        # se almacena como una cadena en st.secrets.firebase.service_account_key
+        firebase_service_account_info = json.loads(st.secrets["firebase"]["service_account_key"])
+        
+        # Inicializar credenciales con el certificado
+        cred = credentials.Certificate(firebase_service_account_info)
         
         # Intentamos inicializar la app de Firebase si no está ya inicializada
         if not firebase_admin._apps:
-            # La configuración de Firebase se proporciona como una cadena JSON
-            firebase_config = json.loads(firebase_config_str)
-            
-            # Para el Admin SDK, necesitamos un objeto de credenciales.
-            # En un entorno de producción, esto sería un archivo JSON de credenciales de servicio.
-            # Aquí, asumimos que el entorno de Canvas maneja la autenticación subyacente
-            # o que las credenciales se derivan de __firebase_config de alguna manera.
-            # Si esto falla, podríamos necesitar un enfoque diferente para la inicialización.
-            
-            # Una forma común de inicializar sin un archivo de credenciales explícito
-            # es si la aplicación ya está corriendo en un entorno Firebase (como Cloud Functions)
-            # o si se usa el método 'get_app()'.
-            
-            # Para simplificar en el contexto de Canvas, y asumiendo que el entorno
-            # ya tiene acceso a las credenciales, intentaremos inicializar directamente.
-            
-            # Si ya hay una app inicializada, no intentamos de nuevo
-            st.session_state.firebase_app = firebase_admin.initialize_app()
+            st.session_state.firebase_app = firebase_admin.initialize_app(cred)
         else:
             st.session_state.firebase_app = firebase_admin.get_app()
 
         st.session_state.db = firestore.client(st.session_state.firebase_app)
         st.session_state.auth = auth
 
-        # Autenticación: Usar el token personalizado si está disponible, de lo contrario, anónimo.
-        # NOTA: En un entorno real de Streamlit, la autenticación de usuario
-        # requeriría un flujo de inicio de sesión (ej. Google Sign-In, email/password)
-        # y no solo un token inicial. Aquí, el token es para la sesión de Canvas.
-        if initial_auth_token:
-            # En el Admin SDK, no hay un signInWithCustomToken directo para el cliente.
-            # El token es para autenticar el propio servidor.
-            # Para la autenticación de usuario final en Streamlit, normalmente usarías
-            # el SDK de cliente de Firebase (JavaScript en el frontend o un wrapper Python).
-            # Dado que el requisito es multi-usuario, asumimos que el entorno de Canvas
-            # maneja la autenticación del usuario final y nos proporciona un UID.
-            pass # No hay una acción directa aquí con el Admin SDK para el token de usuario final.
+        # Para Streamlit Cloud, el userId se obtiene de la autenticación real del usuario.
+        # Si no hay un usuario autenticado, podemos usar un ID de proyecto o un placeholder.
+        # En una aplicación de producción real, implementarías un flujo de inicio de sesión.
+        # Aquí, para que funcione sin un login explícito, usaremos un ID de proyecto o un ID anónimo.
         
-        # El userId se obtendrá del contexto de autenticación de Firebase en el entorno Canvas.
-        # Para propósitos de demostración, usaremos un ID de usuario anónimo o un placeholder.
-        # En un escenario real, 'auth.current_user.uid' sería el camino.
-        # Aquí, simulamos un userId si no hay uno real disponible del entorno.
-        try:
-            # Intenta obtener el usuario actual si la autenticación está activa
-            st.session_state.user_id = st.session_state.auth.get_user(initial_auth_token).uid if initial_auth_token else "anonymous_user_" + st.session_state.firebase_app.name
-        except Exception:
-            st.session_state.user_id = "anonymous_user_" + st.session_state.firebase_app.name # Fallback si el token no es directamente un UID o no hay usuario
+        # Usaremos el project_id como parte del user_id para asegurar unicidad
+        project_id = firebase_service_account_info.get("project_id", "unknown_project")
+        st.session_state.user_id = f"streamlit_cloud_user_{project_id}" 
+        # Opcional: Podrías generar un UUID para cada sesión si necesitas un ID de sesión único
+        # import uuid
+        # st.session_state.user_id = str(uuid.uuid4())
 
         st.session_state.firebase_initialized = True
-        st.success("Firebase inicializado correctamente.")
+        st.success("Firebase inicializado correctamente para Streamlit Cloud.")
     except Exception as e:
         st.error(f"Error al inicializar Firebase: {e}")
         st.warning("La aplicación puede no funcionar correctamente sin Firebase.")
@@ -95,8 +61,10 @@ if not st.session_state.firebase_initialized:
 def get_inventory_collection():
     """Obtiene la referencia a la colección de inventario."""
     if st.session_state.firebase_initialized:
-        # Ruta para datos públicos en el entorno Canvas
-        return st.session_state.db.collection(f"artifacts/{app_id}/public/data/inventory_items")
+        # La ruta de la colección debe ser consistente con tus reglas de seguridad.
+        # Usamos el project_id para crear una colección única por proyecto en Firestore.
+        # Esto es útil si tienes múltiples aplicaciones usando el mismo Firebase.
+        return st.session_state.db.collection(f"projects/{st.session_state.firebase_app.project_id}/inventory_items")
     return None
 
 def add_item_firestore(nombre, stock, precio, costo):
@@ -359,7 +327,8 @@ def main():
     
     with st.sidebar:
         st.title("Menú Principal")
-        st.write(f"**ID de Usuario:** {st.session_state.get('user_id', 'Cargando...')}") # Mostrar ID de usuario
+        # Mostrar el ID de usuario (ahora basado en project_id)
+        st.write(f"**ID de Usuario:** {st.session_state.get('user_id', 'Cargando...')}") 
         
         # El st.radio controla la selección del menú
         st.session_state.current_menu_selection = st.radio(
@@ -374,4 +343,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
