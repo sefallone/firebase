@@ -54,18 +54,25 @@ def registrar_historial(producto_id, operacion, detalles=None):
         )
 
 def obtener_productos(filtro=None):
-    """Obtiene productos con opción a filtrado, devuelve DataFrame"""
-    query = "SELECT * FROM productos"
-    params = ()
-    
-    if filtro and filtro.strip():
-        query += " WHERE nombre LIKE ?"
-        params = (f'%{filtro}%',)
-    
-    query += " ORDER BY nombre"
-    
-    with sqlite3.connect(DB_FILE) as conn:
-        return pd.read_sql(query, conn, params=params)
+    """Obtiene productos opcionalmente filtrados por nombre"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            query = "SELECT * FROM productos"
+            params = ()
+            
+            if filtro and filtro.strip():
+                query += " WHERE nombre LIKE ?"
+                params = (f'%{filtro.strip()}%',)
+            
+            query += " ORDER BY nombre"
+            return pd.read_sql(query, conn, params=params)
+            
+    except sqlite3.Error as e:
+        st.error(f"Error al obtener productos: {str(e)}")
+        return pd.DataFrame()  # Retorna DataFrame vacío en caso de error
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
+        return pd.DataFrame()
 
 def agregar_producto(nombre, stock, precio, costo):
     """Función corregida para agregar productos"""
@@ -175,51 +182,47 @@ def actualizar_producto(id_producto, nombre, stock, precio, costo):
 # ------------------------------------------
 
 def mostrar_inventario():
-    """Muestra el inventario con opciones de filtrado y métricas"""
+    """Muestra el inventario con opción de filtrado"""
     st.header("📋 Inventario Actual")
     
-    # Filtrado y búsqueda
-    col1, col2 = st.columns([3, 1])
-    filtro = col1.text_input("🔍 Buscar producto por nombre:")
-    mostrar_metricas = col2.checkbox("Mostrar métricas", True)
+    # Filtrado por nombre
+    filtro = st.text_input("🔍 Filtrar por nombre:", key="filtro_inventario")
     
-    productos = obtener_productos(filtro)
-    
-    if productos.empty:
-        st.warning("No se encontraron productos")
-        return
-    
-    # Cálculo de métricas
-    productos['Valor Total'] = productos['stock'] * productos['precio']
-    productos['Costo Total'] = productos['stock'] * productos['costo']
-    productos['Margen'] = productos['precio'] - productos['costo']
-    productos['Margen %'] = (productos['Margen'] / productos['precio'] * 100).round(2)
-    
-    # Mostrar métricas resumidas
-    if mostrar_metricas:
-        total_valor = productos['Valor Total'].sum()
-        total_costo = productos['Costo Total'].sum()
-        margen_promedio = productos['Margen %'].mean()
+    try:
+        productos = obtener_productos(filtro)
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Valor Total Inventario", f"${total_valor:,.2f}")
-        m2.metric("Costo Total Inventario", f"${total_costo:,.2f}")
-        m3.metric("Margen Promedio", f"{margen_promedio:.2f}%")
-    
-    # Mostrar tabla con formato
-    st.dataframe(
-        productos.style.format({
-            'precio': '${:,.2f}',
-            'costo': '${:,.2f}',
-            'Valor Total': '${:,.2f}',
-            'Costo Total': '${:,.2f}',
-            'Margen': '${:,.2f}',
-            'Margen %': '{:.2f}%'
-        }),
-        use_container_width=True,
-        height=600
-    )
-
+        if productos.empty:
+            st.warning("No hay productos registrados")
+            return
+            
+        # Cálculo de métricas
+        productos['Valor Total'] = productos['stock'] * productos['precio']
+        productos['Costo Total'] = productos['stock'] * productos['costo']
+        productos['Margen'] = productos['precio'] - productos['costo']
+        productos['Margen %'] = (productos['Margen'] / productos['precio'] * 100).round(2)
+        
+        # Mostrar métricas resumidas
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Productos Registrados", len(productos))
+        col2.metric("Valor Total", f"${productos['Valor Total'].sum():,.2f}")
+        col3.metric("Margen Promedio", f"{productos['Margen %'].mean():.2f}%")
+        
+        # Mostrar tabla
+        st.dataframe(
+            productos.style.format({
+                'precio': '${:,.2f}',
+                'costo': '${:,.2f}',
+                'Valor Total': '${:,.2f}',
+                'Costo Total': '${:,.2f}',
+                'Margen': '${:,.2f}',
+                'Margen %': '{:.2f}%'
+            }),
+            use_container_width=True,
+            height=600
+        )
+        
+    except Exception as e:
+        st.error(f"Error al mostrar inventario: {str(e)}")
 def mostrar_formulario_editar():
     """Formulario para editar productos con validación completa"""
     st.header("✏️ Editar Producto")
@@ -398,7 +401,7 @@ def main():
     if 'main_menu' not in st.session_state:
         st.session_state.main_menu = "Ver Inventario"
     
-    # Definir opciones del menú
+    # Opciones del menú
     MENU_OPTIONS = {
         "Ver Inventario": mostrar_inventario,
         "Agregar Producto": mostrar_formulario_agregar,
@@ -406,25 +409,27 @@ def main():
         "Historial": mostrar_historial
     }
     
-    # Sidebar con menú
+    # Sidebar
     with st.sidebar:
         st.title("Menú Principal")
-        st.image("https://via.placeholder.com/150x50?text=Inventario", width=150)
-        
         selected = st.radio(
             "Opciones:",
             list(MENU_OPTIONS.keys()),
             index=list(MENU_OPTIONS.keys()).index(st.session_state.main_menu)
         )
         
-        st.session_state.main_menu = selected
-        
-        # Mostrar última actualización
-        if 'ultima_actualizacion' in st.session_state:
-            st.caption(f"Última actualización: {st.session_state.ultima_actualizacion.strftime('%Y-%m-%d %H:%M:%S')}")
+        # Mostrar info de la base de datos
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+                st.caption(f"Productos registrados: {count}")
+        except:
+            st.caption("No se pudo conectar a la base de datos")
     
     # Mostrar contenido seleccionado
-    MENU_OPTIONS[selected]()
-
-if __name__ == "__main__":
-    main()
+    try:
+        MENU_OPTIONS[selected]()
+    except Exception as e:
+        st.error(f"Error al cargar la sección: {str(e)}")
+        st.session_state.main_menu = "Ver Inventario"
+        st.rerun()
