@@ -54,7 +54,7 @@ def registrar_historial(producto_id, operacion, detalles=None):
         )
 
 def obtener_productos(filtro=None):
-    """Obtiene todos los productos, opcionalmente filtrados por nombre"""
+    """Obtiene productos con filtrado opcional por nombre"""
     try:
         with sqlite3.connect(DB_FILE) as conn:
             query = "SELECT * FROM productos"
@@ -62,12 +62,16 @@ def obtener_productos(filtro=None):
             
             if filtro and filtro.strip():
                 query += " WHERE nombre LIKE ?"
-                params = (f'%{filtro}%',)
+                params = (f'%{filtro.strip()}%',)
             
             query += " ORDER BY nombre"
             return pd.read_sql(query, conn, params=params)
+            
     except sqlite3.Error as e:
-        st.error(f"Error al cargar productos: {str(e)}")
+        st.error(f"Error de base de datos: {str(e)}")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
         return pd.DataFrame()
 
 def agregar_producto(nombre, stock, precio, costo):
@@ -119,6 +123,8 @@ def agregar_producto(nombre, stock, precio, costo):
     except Exception as e:
         st.error(f"Error inesperado: {str(e)}")
         return False
+
+
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
     """Actualiza un producto existente con validaciones"""
     with sqlite3.connect(DB_FILE) as conn:
@@ -178,30 +184,24 @@ def actualizar_producto(id_producto, nombre, stock, precio, costo):
 # ------------------------------------------
 
 def mostrar_inventario():
-    """Muestra el inventario con opción de filtrado"""
+    """Muestra el inventario con filtrado"""
     st.header("📋 Inventario Actual")
     
     # Widget de búsqueda
-    filtro = st.text_input("🔍 Buscar producto por nombre:")
+    filtro = st.text_input("🔍 Filtrar por nombre:", key="filtro_inventario")
     
-    # Obtener productos (con filtro si aplica)
-    productos = obtener_productos(filtro)
-    
-    if productos.empty:
-        st.warning("No hay productos registrados")
-        return
+    try:
+        productos = obtener_productos(filtro)
+        
+        if productos.empty:
+            st.warning("No hay productos registrados")
+            return
             
-        # Cálculo de métricas
+        # Cálculos de métricas
         productos['Valor Total'] = productos['stock'] * productos['precio']
         productos['Costo Total'] = productos['stock'] * productos['costo']
         productos['Margen'] = productos['precio'] - productos['costo']
         productos['Margen %'] = (productos['Margen'] / productos['precio'] * 100).round(2)
-        
-        # Mostrar métricas resumidas
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Productos Registrados", len(productos))
-        col2.metric("Valor Total", f"${productos['Valor Total'].sum():,.2f}")
-        col3.metric("Margen Promedio", f"{productos['Margen %'].mean():.2f}%")
         
         # Mostrar tabla
         st.dataframe(
@@ -219,6 +219,7 @@ def mostrar_inventario():
         
     except Exception as e:
         st.error(f"Error al mostrar inventario: {str(e)}")
+
 def mostrar_formulario_editar():
     """Formulario para editar productos con validación completa"""
     st.header("✏️ Editar Producto")
