@@ -210,75 +210,65 @@ def mostrar_inventario():
     )
 
 def mostrar_formulario_agregar():
-    """Formulario para agregar productos con validación mejorada"""
+    """Formulario para agregar productos corregido"""
     st.header("➕ Agregar Nuevo Producto")
     
-    with st.form("form_agregar", clear_on_submit=True):
-        nombre = st.text_input("Nombre del Producto*", max_chars=100)
+    # Usamos una clave única para el formulario
+    form_key = "form_agregar_" + str(datetime.now().timestamp())
+    
+    with st.form(key=form_key, clear_on_submit=False):  # Cambiado a False para ver mensajes
+        nombre = st.text_input("Nombre del Producto*", key=f"nombre_{form_key}")
         
         col1, col2 = st.columns(2)
-        stock = col1.number_input("Stock Inicial*", min_value=0, value=0, step=1)
-        precio = col1.number_input("Precio de Venta*", min_value=0.01, value=1.0, step=0.01, format="%.2f")
-        costo = col2.number_input("Costo Unitario*", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+        stock = col1.number_input("Stock Inicial*", 
+                                min_value=0, 
+                                value=0, 
+                                step=1,
+                                key=f"stock_{form_key}")
+        precio = col1.number_input("Precio de Venta*", 
+                                 min_value=0.01, 
+                                 value=1.0, 
+                                 step=0.01, 
+                                 format="%.2f",
+                                 key=f"precio_{form_key}")
+        costo = col2.number_input("Costo Unitario*", 
+                                min_value=0.0, 
+                                value=0.0, 
+                                step=0.01, 
+                                format="%.2f",
+                                key=f"costo_{form_key}")
         
         submitted = st.form_submit_button("Agregar Producto")
+        
         if submitted:
-            if not nombre.strip():
-                st.error("El nombre del producto es obligatorio")
-            elif precio <= costo:
-                st.error("El precio debe ser mayor que el costo")
-            else:
-                if agregar_producto(nombre, stock, precio, costo):
-                    st.success("✅ Producto agregado correctamente")
-                    st.session_state.main_menu = "Ver Inventario"
+            # Validación exhaustiva con mensajes detallados
+            if not nombre or not nombre.strip():
+                st.error("❌ El nombre del producto es obligatorio")
+                st.stop()
+            
+            if precio <= 0:
+                st.error("❌ El precio debe ser mayor que 0")
+                st.stop()
+                
+            if costo < 0:
+                st.error("❌ El costo no puede ser negativo")
+                st.stop()
+                
+            if precio <= costo:
+                st.error("❌ El precio debe ser mayor que el costo")
+                st.stop()
+            
+            # Intentar agregar el producto
+            if agregar_producto(nombre.strip(), stock, precio, costo):
+                st.success("✅ Producto agregado correctamente")
+                # Actualizar estado sin forzar rerun inmediato
+                st.session_state.main_menu = "Ver Inventario"
+                st.session_state.ultima_actualizacion = datetime.now()
+                # Opcional: Usar un botón para redirigir en lugar de rerun automático
+                if st.button("Ver Inventario"):
                     st.rerun()
-
-def mostrar_formulario_editar():
-    """Formulario para editar productos con confirmación"""
-    st.header("✏️ Editar Producto Existente")
-    
-    productos = obtener_productos()
-    if productos.empty:
-        st.warning("No hay productos registrados para editar")
-        return
-    
-    producto_seleccionado = st.selectbox(
-        "Seleccione un producto:",
-        productos['nombre'],
-        key="select_editar"
-    )
-    
-    producto = productos[productos['nombre'] == producto_seleccionado].iloc[0]
-    
-    with st.form("form_editar"):
-        nuevo_nombre = st.text_input("Nombre*", value=producto['nombre'])
-        
-        col1, col2 = st.columns(2)
-        nuevo_stock = col1.number_input("Stock*", min_value=0, value=producto['stock'], step=1)
-        nuevo_precio = col1.number_input("Precio*", min_value=0.01, value=producto['precio'], step=0.01, format="%.2f")
-        nuevo_costo = col2.number_input("Costo*", min_value=0.0, value=producto['costo'], step=0.01, format="%.2f")
-        
-        confirmar = st.checkbox("Confirmar cambios", False)
-        submitted = st.form_submit_button("Actualizar Producto")
-        
-        if submitted and confirmar:
-            if not nuevo_nombre.strip():
-                st.error("El nombre del producto es obligatorio")
-            elif nuevo_precio <= nuevo_costo:
-                st.error("El precio debe ser mayor que el costo")
             else:
-                if actualizar_producto(
-                    producto['id'], 
-                    nuevo_nombre, 
-                    nuevo_stock, 
-                    nuevo_precio, 
-                    nuevo_costo
-                ):
-                    st.success("✅ Producto actualizado correctamente")
-                    st.session_state.main_menu = "Ver Inventario"
-                    st.rerun()
-        elif submitted and not confirmar:
-            st.error("Por favor confirme los cambios marcando la casilla")
+                st.error("⚠️ No se pudo agregar el producto (ver consola para detalles)")
 
 def mostrar_historial():
     """Muestra el historial de cambios del sistema"""
