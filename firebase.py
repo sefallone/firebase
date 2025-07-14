@@ -68,43 +68,54 @@ def obtener_productos(filtro=None):
         return pd.read_sql(query, conn, params=params)
 
 def agregar_producto(nombre, stock, precio, costo):
-    """Agrega un nuevo producto con validaciones completas"""
-    with sqlite3.connect(DB_FILE) as conn:
-        try:
-            # Validación de negocio
-            if precio < costo:
-                st.error("ERROR: El precio no puede ser menor que el costo")
-                return False
-                
+    """Función corregida para agregar productos"""
+    try:
+        # Validaciones adicionales
+        if not nombre or not nombre.strip():
+            st.error("El nombre no puede estar vacío")
+            return False
+            
+        if precio <= 0 or costo < 0:
+            st.error("Precio debe ser positivo y costo no puede ser negativo")
+            return False
+            
+        if precio <= costo:
+            st.error("El precio debe ser mayor que el costo")
+            return False
+
+        with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             
-            # Verificar duplicados
-            cursor.execute("SELECT id FROM productos WHERE nombre=?", (nombre,))
+            # Verificar si el producto ya existe
+            cursor.execute("SELECT id FROM productos WHERE nombre = ?", (nombre.strip(),))
             if cursor.fetchone():
-                st.error(f"ERROR: El producto '{nombre}' ya existe")
+                st.error("Ya existe un producto con ese nombre")
                 return False
                 
             # Insertar nuevo producto
             cursor.execute(
                 "INSERT INTO productos (nombre, stock, precio, costo) VALUES (?, ?, ?, ?)",
-                (nombre, stock, precio, costo)
+                (nombre.strip(), stock, precio, costo)
             )
-            producto_id = cursor.lastrowid
+            conn.commit()
             
             # Registrar en historial
             registrar_historial(
-                producto_id,
+                cursor.lastrowid,
                 "CREACIÓN",
                 f"Stock: {stock}, Precio: {precio}, Costo: {costo}"
             )
             
+            # Forzar actualización del inventario
             st.session_state.ultima_actualizacion = datetime.now()
             return True
             
-        except sqlite3.Error as e:
-            st.error(f"ERROR de base de datos: {str(e)}")
-            return False
-
+    except sqlite3.Error as e:
+        st.error(f"Error de base de datos: {str(e)}")
+        return False
+    except Exception as e:
+        st.error(f"Error inesperado: {str(e)}")
+        return False
 def actualizar_producto(id_producto, nombre, stock, precio, costo):
     """Actualiza un producto existente con validaciones"""
     with sqlite3.connect(DB_FILE) as conn:
@@ -316,65 +327,37 @@ def mostrar_formulario_editar():
 
 
 def mostrar_formulario_agregar():
-    """Formulario para agregar productos corregido"""
+    """Formulario corregido para agregar productos"""
     st.header("➕ Agregar Nuevo Producto")
     
-    # Usamos una clave única para el formulario
-    form_key = "form_agregar_" + str(datetime.now().timestamp())
-    
-    with st.form(key=form_key, clear_on_submit=False):  # Cambiado a False para ver mensajes
-        nombre = st.text_input("Nombre del Producto*", key=f"nombre_{form_key}")
+    with st.form("form_agregar", clear_on_submit=True):
+        nombre = st.text_input("Nombre del Producto*", key="nombre_add")
+        stock = st.number_input("Stock Inicial*", min_value=0, value=0, step=1, key="stock_add")
+        precio = st.number_input("Precio de Venta*", min_value=0.01, value=0.01, step=0.01, format="%.2f", key="precio_add")
+        costo = st.number_input("Costo Unitario*", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="costo_add")
         
-        col1, col2 = st.columns(2)
-        stock = col1.number_input("Stock Inicial*", 
-                                min_value=0, 
-                                value=0, 
-                                step=1,
-                                key=f"stock_{form_key}")
-        precio = col1.number_input("Precio de Venta*", 
-                                 min_value=0.01, 
-                                 value=1.0, 
-                                 step=0.01, 
-                                 format="%.2f",
-                                 key=f"precio_{form_key}")
-        costo = col2.number_input("Costo Unitario*", 
-                                min_value=0.0, 
-                                value=0.0, 
-                                step=0.01, 
-                                format="%.2f",
-                                key=f"costo_{form_key}")
-        
-        submitted = st.form_submit_button("Agregar Producto")
-        
-        if submitted:
-            # Validación exhaustiva con mensajes detallados
-            if not nombre or not nombre.strip():
-                st.error("❌ El nombre del producto es obligatorio")
-                st.stop()
-            
-            if precio <= 0:
-                st.error("❌ El precio debe ser mayor que 0")
-                st.stop()
-                
-            if costo < 0:
-                st.error("❌ El costo no puede ser negativo")
-                st.stop()
-                
-            if precio <= costo:
-                st.error("❌ El precio debe ser mayor que el costo")
-                st.stop()
-            
-            # Intentar agregar el producto
-            if agregar_producto(nombre.strip(), stock, precio, costo):
-                st.success("✅ Producto agregado correctamente")
-                # Actualizar estado sin forzar rerun inmediato
-                st.session_state.main_menu = "Ver Inventario"
-                st.session_state.ultima_actualizacion = datetime.now()
-                # Opcional: Usar un botón para redirigir en lugar de rerun automático
-                if st.button("Ver Inventario"):
-                    st.rerun()
+        if st.form_submit_button("Agregar Producto"):
+            if not nombre.strip():
+                st.error("El nombre es obligatorio")
+            elif precio <= costo:
+                st.error("El precio debe ser mayor que el costo")
             else:
-                st.error("⚠️ No se pudo agregar el producto (ver consola para detalles)")
+                if agregar_producto(nombre, stock, precio, costo):
+                    st.success("Producto agregado correctamente!")
+                    # Esperar 1 segundo antes de refrescar
+                    time.sleep(1)
+                    st.rerun()
+
+def obtener_productos():
+    """Función mejorada para obtener productos"""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            # Usar parámetros para evitar SQL injection
+            query = "SELECT id, nombre, stock, precio, costo, fecha_actualizacion FROM productos ORDER BY nombre"
+            return pd.read_sql(query, conn)
+    except sqlite3.Error as e:
+        st.error(f"Error al cargar productos: {str(e)}")
+        return pd.DataFrame()  # Retornar DataFrame vacío en caso de error
 
 def mostrar_historial():
     """Muestra el historial de cambios del sistema"""
