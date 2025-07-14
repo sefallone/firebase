@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import json
+import json # Todavía se necesita para json.loads si alguna clave fuera un JSON anidado, pero no en este caso.
 
 # Importaciones de Firebase
-# Asegúrate de que 'firebase-admin' esté en tu requirements.txt
 from firebase_admin import credentials, initialize_app, auth, firestore
 import firebase_admin
 
@@ -21,10 +20,22 @@ if 'firebase_initialized' not in st.session_state:
 
 if not st.session_state.firebase_initialized:
     try:
-        # --- Leer credenciales desde Streamlit Secrets ---
-        # El contenido del archivo JSON de la clave de cuenta de servicio
-        # se almacena como una cadena en st.secrets.firebase.service_account_key
-        firebase_service_account_info = json.loads(st.secrets["firebase"]["service_account_key"])
+        # --- Leer credenciales desde Streamlit Secrets (desglosado) ---
+        # Reconstruir el diccionario de la clave de cuenta de servicio
+        # leyendo cada componente individualmente de st.secrets.firebase
+        firebase_service_account_info = {
+            "type": st.secrets["firebase"]["type"],
+            "project_id": st.secrets["firebase"]["project_id"],
+            "private_key_id": st.secrets["firebase"]["private_key_id"],
+            "private_key": st.secrets["firebase"]["private_key"], # Leer directamente la clave privada
+            "client_email": st.secrets["firebase"]["client_email"],
+            "client_id": st.secrets["firebase"]["client_id"],
+            "auth_uri": st.secrets["firebase"]["auth_uri"],
+            "token_uri": st.secrets["firebase"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"],
+            "universe_domain": st.secrets["firebase"]["universe_domain"]
+        }
         
         # Inicializar credenciales con el certificado
         cred = credentials.Certificate(firebase_service_account_info)
@@ -38,17 +49,8 @@ if not st.session_state.firebase_initialized:
         st.session_state.db = firestore.client(st.session_state.firebase_app)
         st.session_state.auth = auth
 
-        # Para Streamlit Cloud, el userId se obtiene de la autenticación real del usuario.
-        # Si no hay un usuario autenticado, podemos usar un ID de proyecto o un placeholder.
-        # En una aplicación de producción real, implementarías un flujo de inicio de sesión.
-        # Aquí, para que funcione sin un login explícito, usaremos un ID de proyecto o un ID anónimo.
-        
-        # Usaremos el project_id como parte del user_id para asegurar unicidad
         project_id = firebase_service_account_info.get("project_id", "unknown_project")
         st.session_state.user_id = f"streamlit_cloud_user_{project_id}" 
-        # Opcional: Podrías generar un UUID para cada sesión si necesitas un ID de sesión único
-        # import uuid
-        # st.session_state.user_id = str(uuid.uuid4())
 
         st.session_state.firebase_initialized = True
         st.success("Firebase inicializado correctamente para Streamlit Cloud.")
@@ -56,14 +58,11 @@ if not st.session_state.firebase_initialized:
         st.error(f"Error al inicializar Firebase: {e}")
         st.warning("La aplicación puede no funcionar correctamente sin Firebase.")
 
-# --- Funciones de Firestore ---
+# --- Funciones de Firestore (resto del código es el mismo) ---
 
 def get_inventory_collection():
     """Obtiene la referencia a la colección de inventario."""
     if st.session_state.firebase_initialized:
-        # La ruta de la colección debe ser consistente con tus reglas de seguridad.
-        # Usamos el project_id para crear una colección única por proyecto en Firestore.
-        # Esto es útil si tienes múltiples aplicaciones usando el mismo Firebase.
         return st.session_state.db.collection(f"projects/{st.session_state.firebase_app.project_id}/inventory_items")
     return None
 
@@ -72,9 +71,8 @@ def add_item_firestore(nombre, stock, precio, costo):
     col_ref = get_inventory_collection()
     if col_ref:
         try:
-            # Verificar si el nombre ya existe (Firestore no tiene UNIQUE constraint)
             docs = col_ref.where('nombre', '==', nombre).stream()
-            if any(True for _ in docs): # Si hay algún documento con ese nombre
+            if any(True for _ in docs):
                 st.error(f"Ya existe un producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
                 return False
 
@@ -83,7 +81,7 @@ def add_item_firestore(nombre, stock, precio, costo):
                 "stock": stock,
                 "precio": precio,
                 "costo": costo,
-                "fecha_actualizacion": firestore.SERVER_TIMESTAMP # Usa el timestamp del servidor
+                "fecha_actualizacion": firestore.SERVER_TIMESTAMP
             }
             col_ref.add(item_data)
             st.success("¡Producto agregado correctamente!")
@@ -98,10 +96,9 @@ def update_item_firestore(item_id, nombre, stock, precio, costo):
     col_ref = get_inventory_collection()
     if col_ref:
         try:
-            # Verificar si el nuevo nombre ya existe en OTRO producto
             docs = col_ref.where('nombre', '==', nombre).stream()
             for doc in docs:
-                if doc.id != item_id: # Si el nombre existe en un documento diferente
+                if doc.id != item_id:
                     st.error(f"Ya existe otro producto con el nombre '{nombre}'. Por favor, elija un nombre único.")
                     return False
 
@@ -113,7 +110,7 @@ def update_item_firestore(item_id, nombre, stock, precio, costo):
                 "costo": costo,
                 "fecha_actualizacion": firestore.SERVER_TIMESTAMP
             }
-            item_ref.update(item_data) # Usa update para modificar campos existentes
+            item_ref.update(item_data)
             st.success("¡Producto actualizado correctamente!")
             return True
         except Exception as e:
@@ -138,40 +135,33 @@ def delete_item_firestore(item_id):
 def setup_realtime_listener():
     """Configura el listener en tiempo real para el inventario."""
     if 'items_data' not in st.session_state:
-        st.session_state.items_data = pd.DataFrame() # Inicializa un DataFrame vacío
+        st.session_state.items_data = pd.DataFrame()
 
     col_ref = get_inventory_collection()
     if col_ref:
-        # Si ya hay un listener activo, lo desuscribimos para evitar duplicados
         if 'unsubscribe_inventory' in st.session_state and st.session_state.unsubscribe_inventory is not None:
             st.session_state.unsubscribe_inventory()
             st.session_state.unsubscribe_inventory = None
 
-        # Callback para cuando los datos cambian
         def on_snapshot(col_snapshot, changes, read_time):
             current_items = []
             for doc in col_snapshot.documents:
                 item = doc.to_dict()
-                item['id'] = doc.id # Añadir el ID del documento al diccionario
+                item['id'] = doc.id
                 current_items.append(item)
             
             df = pd.DataFrame(current_items)
             
-            # Asegurarse de que las columnas numéricas sean del tipo correcto
             for col in ['stock', 'precio', 'costo']:
                 if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0) # Convertir a numérico, NaN a 0
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-            # Ordenar por nombre para consistencia
             if not df.empty:
                 df = df.sort_values(by='nombre').reset_index(drop=True)
 
             st.session_state.items_data = df
-            # Forzar un rerun para actualizar la UI con los nuevos datos
-            # Esto es crucial para que st.dataframe se actualice.
             st.experimental_rerun()
 
-        # Configurar el listener y guardar la función de desuscripción
         st.session_state.unsubscribe_inventory = col_ref.on_snapshot(on_snapshot)
         st.success("Listener de inventario en tiempo real activado.")
     else:
@@ -183,7 +173,6 @@ def display_inventory():
     """Muestra el inventario actual con auto-actualización."""
     st.header("📊 Inventario Actual")
 
-    # Asegurarse de que el listener esté activo
     if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
         setup_realtime_listener()
 
@@ -191,9 +180,8 @@ def display_inventory():
         st.info("No hay productos registrados en el inventario.")
         return
     
-    productos = st.session_state.items_data.copy() # Trabajar con una copia para evitar SettingWithCopyWarning
+    productos = st.session_state.items_data.copy()
     
-    # Calcular valores adicionales
     productos['Valor Total'] = productos['stock'] * productos['precio']
     productos['Costo Total'] = productos['stock'] * productos['costo']
     productos['Margen'] = productos['precio'] - productos['costo']
@@ -228,14 +216,12 @@ def add_product_form():
             elif precio <= 0 or costo < 0:
                 st.error("Precio de venta debe ser positivo y costo no puede ser negativo.")
             else:
-                # La función add_item_firestore ya maneja el éxito/error y el rerun
                 add_item_firestore(nombre, stock, precio, costo)
 
 def edit_product_form():
     """Formulario para editar productos existentes."""
     st.header("✏️ Editar Producto")
     
-    # Asegurarse de que el listener esté activo y los datos estén cargados
     if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
         setup_realtime_listener()
 
@@ -245,7 +231,6 @@ def edit_product_form():
         st.warning("No hay productos para editar.")
         return
     
-    # Crear un diccionario para mapear nombre a ID del documento
     product_name_to_id = {row['nombre']: row['id'] for index, row in productos.iterrows()}
     
     producto_seleccionado_nombre = st.selectbox(
@@ -257,10 +242,8 @@ def edit_product_form():
     if producto_seleccionado_nombre is None:
         return
     
-    # Obtener el ID del producto seleccionado
     selected_item_id = product_name_to_id[producto_seleccionado_nombre]
     
-    # Obtener los datos del producto seleccionado del DataFrame
     producto_actual = productos[productos['id'] == selected_item_id].iloc[0]
     
     with st.form("form_edit_product"):
@@ -276,14 +259,12 @@ def edit_product_form():
             elif nuevo_precio <= 0 or nuevo_costo < 0:
                 st.error("Precio de venta debe ser positivo y costo no puede ser negativo.")
             else:
-                # La función update_item_firestore ya maneja el éxito/error y el rerun
                 update_item_firestore(selected_item_id, nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo)
 
 def delete_product_form():
     """Formulario para eliminar productos."""
     st.header("🗑️ Eliminar Producto")
 
-    # Asegurarse de que el listener esté activo y los datos estén cargados
     if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
         setup_realtime_listener()
 
@@ -307,14 +288,12 @@ def delete_product_form():
     selected_item_id = product_name_to_id[producto_a_eliminar_nombre]
 
     if st.button(f"Confirmar Eliminación de '{producto_a_eliminar_nombre}'", key="confirm_delete_button"):
-        # La función delete_item_firestore ya maneja el éxito/error y el rerun
         delete_item_firestore(selected_item_id)
 
 
 # --- Menú Principal ---
 
 def main():
-    # Inicializar el estado del menú si no existe
     if 'current_menu_selection' not in st.session_state:
         st.session_state.current_menu_selection = "Ver Inventario"
 
@@ -327,10 +306,8 @@ def main():
     
     with st.sidebar:
         st.title("Menú Principal")
-        # Mostrar el ID de usuario (ahora basado en project_id)
         st.write(f"**ID de Usuario:** {st.session_state.get('user_id', 'Cargando...')}") 
         
-        # El st.radio controla la selección del menú
         st.session_state.current_menu_selection = st.radio(
             "Seleccione una opción:",
             list(menu_options.keys()),
@@ -338,7 +315,6 @@ def main():
             index=list(menu_options.keys()).index(st.session_state.current_menu_selection)
         )
     
-    # Ejecutar la función correspondiente a la opción seleccionada
     menu_options[st.session_state.current_menu_selection]()
 
 if __name__ == "__main__":
