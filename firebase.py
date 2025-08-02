@@ -100,11 +100,16 @@ def update_item_firestore(item_id, nombre, stock, precio, costo):
             }
             item_ref.update(item_data)
             st.success("¡Producto actualizado correctamente!")
+            
+            # Recargar datos para refrescar UI
+            load_inventory_once()
+            
             return True
         except Exception as e:
             st.error(f"Error al actualizar producto: {e}")
             return False
     return False
+
 
 def delete_item_firestore(item_id):
     col_ref = get_inventory_collection()
@@ -112,13 +117,16 @@ def delete_item_firestore(item_id):
         try:
             col_ref.document(item_id).delete()
             st.success("¡Producto eliminado correctamente!")
+            
+            # Recargar datos para refrescar UI
+            load_inventory_once()
+            
             return True
         except Exception as e:
             st.error(f"Error al eliminar producto: {e}")
             return False
     return False
-
-# --- Listener en tiempo real (corregido sin rerun) ---
+    
 
 def setup_realtime_listener():
     if 'items_data' not in st.session_state:
