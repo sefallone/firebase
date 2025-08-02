@@ -5,11 +5,11 @@ import json
 
 # ---------------------- Configuración de Firestore ---------------------- #
 
+@st.cache_resource
 def init_firestore():
-    if not hasattr(st.session_state, 'firestore_initialized'):
+    if not firebase_admin._apps:
         cred = credentials.Certificate(st.secrets["firebase"])
-        initialize_app(cred)
-        st.session_state.firestore_initialized = True
+        firebase_admin.initialize_app(cred)
     return firestore.client()
 
 db = init_firestore()
