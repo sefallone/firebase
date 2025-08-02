@@ -189,18 +189,25 @@ def load_inventory_once():
 # --- Interfaz de Usuario ---
 
 def display_inventory():
+    
     st.header("📊 Inventario Actual")
-    # Opción 1: Listener en tiempo real
     setup_realtime_listener()
     
-    # Opción 2: Si quieres probar sin listener, usa esta línea en vez de la anterior:
-    # load_inventory_once()
-
-    if 'items_data' not in st.session_state or st.session_state.items_data.empty:
+    if 'items_data' not in st.session_state:
+        st.info("Cargando datos del inventario...")
+        return
+    
+    productos = st.session_state.items_data
+    
+    # Mostrar datos sin procesar para debug
+    st.write("DEBUG: Productos actuales en items_data:")
+    st.write(productos)
+    
+    if productos.empty:
         st.info("No hay productos registrados en el inventario.")
         return
     
-    productos = st.session_state.items_data.copy()
+    productos = productos.copy()
     
     productos['Valor Total'] = productos['stock'] * productos['precio']
     productos['Costo Total'] = productos['stock'] * productos['costo']
