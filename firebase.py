@@ -7,7 +7,7 @@ import json
 
 def init_firestore():
     if not hasattr(st.session_state, 'firestore_initialized'):
-        cred = credentials.Certificate(json.loads(st.secrets["firebase"].to_dict()))
+        cred = credentials.Certificate(st.secrets["firebase"])
         initialize_app(cred)
         st.session_state.firestore_initialized = True
     return firestore.client()
