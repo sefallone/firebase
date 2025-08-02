@@ -56,8 +56,9 @@ if not st.session_state.firebase_initialized:
 def get_inventory_collection():
     """Obtiene la referencia a la colección de inventario."""
     if st.session_state.firebase_initialized:
-        return st.session_state.db.collection(f"projects/{st.session_state.firebase_app.project_id}/inventory_items")
+        return st.session_state.db.collection("inventory_items")  # ✅ Accede a colección raíz correctamente
     return None
+
 
 def add_item_firestore(nombre, stock, precio, costo):
     """Agrega un nuevo producto a Firestore."""
