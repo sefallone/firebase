@@ -1,33 +1,26 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import json # Todavía se necesita para json.loads si alguna clave fuera un JSON anidado, pero no en este caso.
-
-# Importaciones de Firebase
+import json 
 from firebase_admin import credentials, initialize_app, auth, firestore
 import firebase_admin
 
-# --- Configuración de la aplicación Streamlit ---
-st.set_page_config(page_title="Sistema de Inventario en Tiempo Real", layout="wide")
-st.title("📦 Sistema de Gestión de Inventario en Tiempo Real (Firestore)")
 
-# --- Inicialización de Firebase ---
-# Usamos st.session_state para almacenar las instancias de Firebase
-# para que no se reinicialicen en cada rerun de Streamlit.
+st.set_page_config(page_title="Prueba de Coneión Firestore", layout="wide")
+st.title("📦 (Firestore)")
+
+
 
 if 'firebase_initialized' not in st.session_state:
     st.session_state.firebase_initialized = False
 
 if not st.session_state.firebase_initialized:
     try:
-        # --- Leer credenciales desde Streamlit Secrets (desglosado) ---
-        # Reconstruir el diccionario de la clave de cuenta de servicio
-        # leyendo cada componente individualmente de st.secrets.firebase
         firebase_service_account_info = {
             "type": st.secrets["firebase"]["type"],
             "project_id": st.secrets["firebase"]["project_id"],
             "private_key_id": st.secrets["firebase"]["private_key_id"],
-            "private_key": st.secrets["firebase"]["private_key"], # Leer directamente la clave privada
+            "private_key": st.secrets["firebase"]["private_key"],
             "client_email": st.secrets["firebase"]["client_email"],
             "client_id": st.secrets["firebase"]["client_id"],
             "auth_uri": st.secrets["firebase"]["auth_uri"],
