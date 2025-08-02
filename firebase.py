@@ -166,9 +166,9 @@ def setup_realtime_listener():
 def display_inventory():
     """Muestra el inventario actual con auto-actualización."""
     st.header("📊 Inventario Actual")
-
-    if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
-        setup_realtime_listener()
+    setup_realtime_listener()  # ⚠️ Forzamos su activación siempre
+    #if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
+        #setup_realtime_listener()
 
     if st.session_state.items_data.empty:
         st.info("No hay productos registrados en el inventario.")
