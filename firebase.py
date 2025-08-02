@@ -133,9 +133,14 @@ def setup_realtime_listener():
 
     col_ref = get_inventory_collection()
     if col_ref:
-        if 'unsubscribe_inventory' in st.session_state and st.session_state.unsubscribe_inventory is not None:
-            st.session_state.unsubscribe_inventory()
+        if 'unsubscribe_inventory' in st.session_state:
+            try:
+                if callable(st.session_state.unsubscribe_inventory):
+                    st.session_state.unsubscribe_inventory()
+            except Exception as e:
+                st.warning(f"No se pudo cancelar el listener anterior: {e}")
             st.session_state.unsubscribe_inventory = None
+
 
         def on_snapshot(col_snapshot, changes, read_time):
             current_items = []
