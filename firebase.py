@@ -5,11 +5,8 @@ import json
 from firebase_admin import credentials, initialize_app, auth, firestore
 import firebase_admin
 
-
 st.set_page_config(page_title="Prueba de Coneión Firestore", layout="wide")
 st.title("📦 (Firestore)")
-
-
 
 if 'firebase_initialized' not in st.session_state:
     st.session_state.firebase_initialized = False
@@ -33,7 +30,7 @@ if not st.session_state.firebase_initialized:
         # Inicializar credenciales con el certificado
         cred = credentials.Certificate(firebase_service_account_info)
         
-        # Intentamos inicializar la app de Firebase si no está ya inicializada
+        # Inicializar app Firebase
         if not firebase_admin._apps:
             st.session_state.firebase_app = firebase_admin.initialize_app(cred)
         else:
@@ -51,17 +48,15 @@ if not st.session_state.firebase_initialized:
         st.error(f"Error al inicializar Firebase: {e}")
         st.warning("La aplicación puede no funcionar correctamente sin Firebase.")
 
-# --- Funciones de Firestore (resto del código es el mismo) ---
+# --- Funciones Firestore ---
 
 def get_inventory_collection():
-    """Obtiene la referencia a la colección de inventario."""
     if st.session_state.firebase_initialized:
-        return st.session_state.db.collection("inventory_items")  # ✅ Accede a colección raíz correctamente
+        # Asegúrate que tu colección se llama exactamente así en Firestore:
+        return st.session_state.db.collection("inventory_items")
     return None
 
-
 def add_item_firestore(nombre, stock, precio, costo):
-    """Agrega un nuevo producto a Firestore."""
     col_ref = get_inventory_collection()
     if col_ref:
         try:
@@ -86,7 +81,6 @@ def add_item_firestore(nombre, stock, precio, costo):
     return False
 
 def update_item_firestore(item_id, nombre, stock, precio, costo):
-    """Actualiza un producto existente en Firestore."""
     col_ref = get_inventory_collection()
     if col_ref:
         try:
@@ -113,7 +107,6 @@ def update_item_firestore(item_id, nombre, stock, precio, costo):
     return False
 
 def delete_item_firestore(item_id):
-    """Elimina un producto de Firestore."""
     col_ref = get_inventory_collection()
     if col_ref:
         try:
@@ -125,14 +118,15 @@ def delete_item_firestore(item_id):
             return False
     return False
 
-# --- Real-time Listener (onSnapshot) ---
+# --- Listener en tiempo real (corregido sin rerun) ---
+
 def setup_realtime_listener():
-    """Configura el listener en tiempo real para el inventario."""
     if 'items_data' not in st.session_state:
         st.session_state.items_data = pd.DataFrame()
 
     col_ref = get_inventory_collection()
     if col_ref:
+        # Cancelar listener previo si existe
         if 'unsubscribe_inventory' in st.session_state:
             try:
                 if callable(st.session_state.unsubscribe_inventory):
@@ -140,7 +134,6 @@ def setup_realtime_listener():
             except Exception as e:
                 st.warning(f"No se pudo cancelar el listener anterior: {e}")
             st.session_state.unsubscribe_inventory = None
-
 
         def on_snapshot(col_snapshot, changes, read_time):
             current_items = []
@@ -154,29 +147,56 @@ def setup_realtime_listener():
             for col in ['stock', 'precio', 'costo']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
+
             if not df.empty:
                 df = df.sort_values(by='nombre').reset_index(drop=True)
-        
-            st.session_state.items_data = df
-            # NO llamar st.experimental_rerun()
 
+            st.session_state.items_data = df
+            # ¡NO llamar a st.experimental_rerun() aquí!
+
+            # Debug: Mostrar datos en sidebar para validar que llegan
+            st.sidebar.write("Listener data:", df)
 
         st.session_state.unsubscribe_inventory = col_ref.on_snapshot(on_snapshot)
         st.success("Listener de inventario en tiempo real activado.")
     else:
         st.warning("No se pudo configurar el listener de Firestore. Firebase no inicializado.")
 
+# --- Función alternativa para cargar inventario SIN listener ---
+
+def load_inventory_once():
+    col_ref = get_inventory_collection()
+    if col_ref:
+        try:
+            docs = col_ref.stream()
+            items = []
+            for doc in docs:
+                item = doc.to_dict()
+                item['id'] = doc.id
+                items.append(item)
+            df = pd.DataFrame(items)
+            for col in ['stock', 'precio', 'costo']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            if not df.empty:
+                df = df.sort_values(by='nombre').reset_index(drop=True)
+            st.session_state.items_data = df
+            st.success("Inventario cargado correctamente (polling).")
+            st.sidebar.write("Polling data:", df)  # Mostrar datos para debug
+        except Exception as e:
+            st.error(f"Error al cargar inventario (polling): {e}")
+
 # --- Interfaz de Usuario ---
 
 def display_inventory():
-    """Muestra el inventario actual con auto-actualización."""
     st.header("📊 Inventario Actual")
-    setup_realtime_listener()  # ⚠️ Forzamos su activación siempre
-    #if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
-        #setup_realtime_listener()
+    # Opción 1: Listener en tiempo real
+    setup_realtime_listener()
+    
+    # Opción 2: Si quieres probar sin listener, usa esta línea en vez de la anterior:
+    # load_inventory_once()
 
-    if st.session_state.items_data.empty:
+    if 'items_data' not in st.session_state or st.session_state.items_data.empty:
         st.info("No hay productos registrados en el inventario.")
         return
     
@@ -200,7 +220,6 @@ def display_inventory():
     )
 
 def add_product_form():
-    """Formulario para agregar nuevos productos."""
     st.header("➕ Agregar Nuevo Producto")
     
     with st.form("form_add_product", clear_on_submit=True):
@@ -219,7 +238,6 @@ def add_product_form():
                 add_item_firestore(nombre, stock, precio, costo)
 
 def edit_product_form():
-    """Formulario para editar productos existentes."""
     st.header("✏️ Editar Producto")
     
     if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
@@ -262,7 +280,6 @@ def edit_product_form():
                 update_item_firestore(selected_item_id, nuevo_nombre, nuevo_stock, nuevo_precio, nuevo_costo)
 
 def delete_product_form():
-    """Formulario para eliminar productos."""
     st.header("🗑️ Eliminar Producto")
 
     if 'unsubscribe_inventory' not in st.session_state or st.session_state.unsubscribe_inventory is None:
@@ -290,7 +307,6 @@ def delete_product_form():
     if st.button(f"Confirmar Eliminación de '{producto_a_eliminar_nombre}'", key="confirm_delete_button"):
         delete_item_firestore(selected_item_id)
 
-
 # --- Menú Principal ---
 
 def main():
@@ -314,10 +330,15 @@ def main():
             key="main_menu_radio",
             index=list(menu_options.keys()).index(st.session_state.current_menu_selection)
         )
-    
+
+        # Botón para cargar inventario manualmente (útil si usas polling)
+        if st.button("Recargar Inventario Manualmente"):
+            load_inventory_once()
+
     menu_options[st.session_state.current_menu_selection]()
 
 if __name__ == "__main__":
     main()
+
 
 
