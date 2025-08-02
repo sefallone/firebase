@@ -154,12 +154,13 @@ def setup_realtime_listener():
             for col in ['stock', 'precio', 'costo']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
+        
             if not df.empty:
                 df = df.sort_values(by='nombre').reset_index(drop=True)
-
+        
             st.session_state.items_data = df
-            st.experimental_rerun()
+            # NO llamar st.experimental_rerun()
+
 
         st.session_state.unsubscribe_inventory = col_ref.on_snapshot(on_snapshot)
         st.success("Listener de inventario en tiempo real activado.")
